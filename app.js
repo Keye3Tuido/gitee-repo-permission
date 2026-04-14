@@ -8,6 +8,7 @@ let selectedRepos = new Set();
 let currentRepo = null;
 let collapsedGroups = new Set();
 let currentCollabs = []; // cached collaborators for current repo
+let currentUser = '';   // logged-in username
 
 function getConfig() {
   try {
@@ -103,6 +104,19 @@ async function loadAllRepos() {
 
   try {
     const user = await giteeApi('GET', '/user');
+    currentUser = user.login;
+    // Show current user in topbar
+    var userDisplay = document.getElementById('current-user-display');
+    var userNameEl = document.getElementById('current-user-name');
+    var userAvatarEl = document.getElementById('current-user-avatar');
+    if (userDisplay && userNameEl) {
+      userNameEl.textContent = user.login;
+      if (userAvatarEl && user.avatar_url) {
+        userAvatarEl.src = user.avatar_url;
+        userAvatarEl.onerror = function() { userAvatarEl.style.display = 'none'; };
+      }
+      userDisplay.style.display = 'flex';
+    }
     setStatus('\u6b63\u5728\u52a0\u8f7d ' + user.login + ' \u7684\u4ed3\u5e93\u2026', user.login);
 
     const includeOrg = document.getElementById('org-toggle').checked;
@@ -408,7 +422,49 @@ function renderCollabList(filter) {
 // ============================================================
 // Collaborator CRUD
 // ============================================================
+var PERM_LEVEL = { pull: 0, push: 1, admin: 2 };
+
+function getCurrentPermLevel(repoFullName, username) {
+  // Look up from cached collaborators
+  var collab = currentCollabs.find(function(c) {
+    return c.login && c.login.toLowerCase() === username.toLowerCase();
+  });
+  if (collab) {
+    var cp = collab.permissions || collab.permission || {};
+    if (cp.admin) return 2;
+    if (cp.push) return 1;
+    return 0;
+  }
+  return -1; // unknown
+}
+
 async function updateCollabPermission(repoFullName, username, permission) {
+  var permLabels = { pull: '只读', push: '读写', admin: '管理员' };
+  var permLabel = permLabels[permission] || permission;
+
+  // Detect self-modification with stronger warning
+  if (currentUser && username.toLowerCase() === currentUser.toLowerCase()) {
+    var curLevel = getCurrentPermLevel(repoFullName, username);
+    var newLevel = PERM_LEVEL[permission] !== undefined ? PERM_LEVEL[permission] : -1;
+    var isDemotion = curLevel > newLevel;
+
+    var msg = '⚠️ 警告：你正在修改【自己】在 ' + repoFullName + ' 的权限为 ' + permLabel + '(' + permission + ')！\n\n';
+    if (isDemotion) {
+      msg += '⛔ 这是一个降级操作！降级后你可能无法恢复自己的权限！\n\n确定要继续吗？';
+    } else {
+      msg += '确定要继续吗？';
+    }
+    if (!confirm(msg)) {
+      loadRepoDetail(repoFullName);
+      return;
+    }
+  } else {
+    if (!confirm('确定将 ' + username + ' 在 ' + repoFullName + ' 的权限修改为 ' + permLabel + '(' + permission + ')？')) {
+      loadRepoDetail(repoFullName);
+      return;
+    }
+  }
+
   setStatus('\u6b63\u5728\u66f4\u65b0 ' + username + ' \u5728 ' + repoFullName + ' \u7684\u6743\u9650\u2026');
   try {
     await giteeApi('PUT', '/repos/' + repoFullName + '/collaborators/' + username, { permission: permission });
@@ -422,7 +478,11 @@ async function updateCollabPermission(repoFullName, username, permission) {
 }
 
 async function removeCollab(repoFullName, username) {
-  if (!confirm('\u786e\u5b9a\u4ece ' + repoFullName + ' \u79fb\u9664 ' + username + '\uff1f')) return;
+  if (currentUser && username.toLowerCase() === currentUser.toLowerCase()) {
+    if (!confirm('⛔ 警告：你正在将【自己】从 ' + repoFullName + ' 移除！\n\n移除后你将无法访问该仓库，且无法自行恢复！\n\n确定要继续吗？')) return;
+  } else {
+    if (!confirm('\u786e\u5b9a\u4ece ' + repoFullName + ' \u79fb\u9664 ' + username + '\uff1f')) return;
+  }
   setStatus('\u6b63\u5728\u79fb\u9664 ' + username + '\u2026');
   try {
     await giteeApi('DELETE', '/repos/' + repoFullName + '/collaborators/' + username);
@@ -466,6 +526,9 @@ function promptAddCollab() {
     var username = userInput.value.trim();
     var permission = permSelect.value;
     if (!username) { setStatus('\u8bf7\u8f93\u5165\u7528\u6237\u540d'); return; }
+    var permLabels = { pull: '只读', push: '读写', admin: '管理员' };
+    var permLabel = permLabels[permission] || permission;
+    if (!confirm('确定将 ' + username + ' 以 ' + permLabel + '(' + permission + ') 权限添加到 ' + currentRepo + '？')) return;
     try {
       await giteeApi('PUT', '/repos/' + currentRepo + '/collaborators/' + username, { permission: permission });
       appendLog(currentRepo + ': \u5df2\u6dfb\u52a0 ' + username + ' (' + permission + ')', 'ok');
@@ -494,7 +557,29 @@ async function batchAddCollab() {
   setConfig({ token: getToken(), lastUser: username });
 
   const repos = Array.from(selectedRepos);
-  if (!confirm('\u786e\u5b9a\u4e3a ' + username + ' \u6dfb\u52a0 ' + permission + ' \u6743\u9650\u5230 ' + repos.length + ' \u4e2a\u4ed3\u5e93\uff1f')) return;
+  var isSelf = currentUser && username.toLowerCase() === currentUser.toLowerCase();
+  var confirmMsg;
+  if (isSelf) {
+    // Check if any selected repo would be a demotion
+    var newLevel = PERM_LEVEL[permission] !== undefined ? PERM_LEVEL[permission] : -1;
+    var demotionCount = 0;
+    for (var di = 0; di < repos.length; di++) {
+      var repo = allRepos.find(function(r) { return r.full_name === repos[di]; });
+      if (repo) {
+        var rp = repo.permission || {};
+        var curLvl = rp.admin ? 2 : rp.push ? 1 : 0;
+        if (curLvl > newLevel) demotionCount++;
+      }
+    }
+    if (demotionCount > 0) {
+      confirmMsg = '⚠️ 警告：你正在批量修改【自己】在 ' + repos.length + ' 个仓库的权限为 ' + permission + '！\n\n⛔ 其中 ' + demotionCount + ' 个仓库是降级操作，降级后你可能无法恢复权限！\n\n确定要继续吗？';
+    } else {
+      confirmMsg = '你正在批量修改【自己】在 ' + repos.length + ' 个仓库的权限为 ' + permission + '，确定要继续吗？';
+    }
+  } else {
+    confirmMsg = '\u786e\u5b9a\u4e3a ' + username + ' \u6dfb\u52a0 ' + permission + ' \u6743\u9650\u5230 ' + repos.length + ' \u4e2a\u4ed3\u5e93\uff1f';
+  }
+  if (!confirm(confirmMsg)) return;
 
   clearLog();
   switchTab('log');
@@ -523,7 +608,14 @@ async function batchRemoveCollab() {
   if (selectedRepos.size === 0) { setStatus('\u8bf7\u5148\u9009\u62e9\u4ed3\u5e93'); return; }
 
   const repos = Array.from(selectedRepos);
-  if (!confirm('\u786e\u5b9a\u4ece ' + repos.length + ' \u4e2a\u4ed3\u5e93\u79fb\u9664 ' + username + '\uff1f')) return;
+  var isSelf = currentUser && username.toLowerCase() === currentUser.toLowerCase();
+  var confirmMsg;
+  if (isSelf) {
+    confirmMsg = '⛔ 警告：你正在批量将【自己】从 ' + repos.length + ' 个仓库移除！\n\n移除后你将无法访问这些仓库，且无法自行恢复！\n\n确定要继续吗？';
+  } else {
+    confirmMsg = '\u786e\u5b9a\u4ece ' + repos.length + ' \u4e2a\u4ed3\u5e93\u79fb\u9664 ' + username + '\uff1f';
+  }
+  if (!confirm(confirmMsg)) return;
 
   clearLog();
   switchTab('log');
