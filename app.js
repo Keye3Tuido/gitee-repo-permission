@@ -1,0 +1,653 @@
+// ============================================================
+// Gitee Repo Permission Manager - app.js
+// ============================================================
+
+const STORAGE_KEY = 'gitee_perm_config';
+let allRepos = [];
+let selectedRepos = new Set();
+let currentRepo = null;
+let collapsedGroups = new Set();
+
+function getConfig() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
+    stored.token = sessionStorage.getItem('gitee_perm_token') || '';
+    return stored;
+  } catch { return {}; }
+}
+function setConfig(c) {
+  sessionStorage.setItem('gitee_perm_token', c.token || '');
+  const toStore = { ...c }; delete toStore.token;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
+}
+
+(function init() {
+  const c = getConfig();
+  document.getElementById('token-input').value = c.token || '';
+  document.getElementById('batch-user').value = c.lastUser || '';
+})();
+
+function toggleTokenVisibility() {
+  const el = document.getElementById('token-input');
+  el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+function setStatus(msg, right) {
+  document.getElementById('status-left').textContent = msg;
+  if (right !== undefined) document.getElementById('status-right').textContent = right;
+}
+
+function appendLog(msg, type) {
+  type = type || 'info';
+  const panel = document.getElementById('log-panel');
+  const div = document.createElement('div');
+  div.className = 'log-' + type;
+  div.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+  panel.appendChild(div);
+  panel.scrollTop = panel.scrollHeight;
+}
+
+function clearLog() {
+  document.getElementById('log-panel').innerHTML = '';
+}
+
+function getToken() {
+  return document.getElementById('token-input').value.trim();
+}
+
+async function giteeApi(method, path, body) {
+  const token = getToken();
+  if (!token) throw new Error('\u8bf7\u5148\u8f93\u5165 Token');
+  const url = new URL('https://gitee.com/api/v5' + path);
+  const opts = { method, headers: {} };
+  if (method === 'GET') {
+    url.searchParams.set('access_token', token);
+  } else {
+    opts.headers['Content-Type'] = 'application/json';
+    body = body || {};
+    body.access_token = token;
+    opts.body = JSON.stringify(body);
+  }
+  const r = await fetch(url.toString(), opts);
+  if (r.status === 204) return null;
+  const data = await r.json().catch(function() { return {}; });
+  if (!r.ok) throw new Error('API ' + r.status + ': ' + (data.message || r.statusText));
+  return data;
+}
+
+async function giteeApiFetchAll(path) {
+  const results = []; let page = 1;
+  while (page <= 100) {
+    const sep = path.includes('?') ? '&' : '?';
+    const data = await giteeApi('GET', path + sep + 'per_page=100&page=' + page);
+    if (!Array.isArray(data) || data.length === 0) break;
+    results.push(...data);
+    if (data.length < 100) break;
+    page++;
+  }
+  return results;
+}
+
+// ============================================================
+// Load repos
+// ============================================================
+async function loadAllRepos() {
+  const token = getToken();
+  if (!token) { setStatus('\u8bf7\u8f93\u5165 Token'); return; }
+  setConfig({ token, lastUser: document.getElementById('batch-user').value.trim() });
+  const btn = document.getElementById('load-btn');
+  btn.disabled = true; btn.textContent = '\u52a0\u8f7d\u4e2d\u2026';
+  setStatus('\u6b63\u5728\u52a0\u8f7d\u4ed3\u5e93\u5217\u8868\u2026');
+  allRepos = []; selectedRepos.clear(); currentRepo = null;
+
+  try {
+    const user = await giteeApi('GET', '/user');
+    setStatus('\u6b63\u5728\u52a0\u8f7d ' + user.login + ' \u7684\u4ed3\u5e93\u2026', user.login);
+    const ownRepos = await giteeApiFetchAll('/user/repos?type=all&sort=full_name');
+
+    const includeOrg = document.getElementById('org-toggle').checked;
+    let orgRepos = [];
+    if (includeOrg) {
+      const orgs = await giteeApiFetchAll('/user/orgs');
+      for (const org of orgs) {
+        setStatus('\u6b63\u5728\u52a0\u8f7d\u7ec4\u7ec7: ' + org.login + '\u2026');
+        try {
+          const repos = await giteeApiFetchAll('/orgs/' + org.login + '/repos?type=all');
+          orgRepos.push(...repos);
+        } catch (e) {
+          appendLog('\u52a0\u8f7d\u7ec4\u7ec7 ' + org.login + ' \u5931\u8d25: ' + e.message, 'err');
+        }
+      }
+    }
+
+    const seen = new Set();
+    const merged = [];
+    var allRaw = ownRepos.concat(orgRepos);
+    for (var i = 0; i < allRaw.length; i++) {
+      var r = allRaw[i];
+      if (seen.has(r.full_name)) continue;
+      seen.add(r.full_name);
+      merged.push({
+        full_name: r.full_name,
+        name: r.name,
+        owner: (r.owner && r.owner.login) || r.full_name.split('/')[0],
+        permission: r.permission || {},
+        html_url: r.html_url,
+        description: r.description || '',
+        isPrivate: !!r.private,
+      });
+    }
+
+    const needPerm = merged.filter(function(r) { return !r.permission || Object.keys(r.permission).length === 0; });
+    if (needPerm.length > 0) {
+      setStatus('\u6b63\u5728\u83b7\u53d6 ' + needPerm.length + ' \u4e2a\u4ed3\u5e93\u7684\u6743\u9650\u4fe1\u606f\u2026');
+      for (var j = 0; j < needPerm.length; j++) {
+        try {
+          const detail = await giteeApi('GET', '/repos/' + needPerm[j].full_name);
+          needPerm[j].permission = detail.permission || {};
+        } catch (e) { /* skip */ }
+      }
+    }
+
+    allRepos = merged.sort(function(a, b) { return a.full_name.localeCompare(b.full_name); });
+    setStatus('\u5df2\u52a0\u8f7d ' + allRepos.length + ' \u4e2a\u4ed3\u5e93', user.login);
+    appendLog('\u5df2\u52a0\u8f7d ' + allRepos.length + ' \u4e2a\u4ed3\u5e93', 'ok');
+    renderRepoList();
+  } catch (e) {
+    setStatus('\u52a0\u8f7d\u5931\u8d25: ' + e.message);
+    appendLog('\u52a0\u8f7d\u5931\u8d25: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false; btn.textContent = '\u52a0\u8f7d\u4ed3\u5e93';
+  }
+}
+
+// ============================================================
+// Repo list rendering
+// ============================================================
+function getPermGroup(repo) {
+  const p = repo.permission || {};
+  if (p.admin) return 'admin';
+  if (p.push) return 'push';
+  return 'pull';
+}
+
+function renderRepoList() {
+  const container = document.getElementById('repo-list');
+  container.innerHTML = '';
+  const filter = document.getElementById('repo-search').value.trim().toLowerCase();
+
+  const groups = { admin: [], push: [], pull: [] };
+  for (var i = 0; i < allRepos.length; i++) {
+    var r = allRepos[i];
+    if (filter && r.full_name.toLowerCase().indexOf(filter) === -1) continue;
+    groups[getPermGroup(r)].push(r);
+  }
+
+  const GROUP_META = [
+    { key: 'admin', label: '\u7ba1\u7406\u5458', cls: 'admin' },
+    { key: 'push',  label: '\u8bfb\u5199', cls: 'push' },
+    { key: 'pull',  label: '\u53ea\u8bfb', cls: 'pull' },
+  ];
+
+  let totalVisible = 0;
+  for (var g = 0; g < GROUP_META.length; g++) {
+    var gm = GROUP_META[g];
+    var repos = groups[gm.key];
+    if (repos.length === 0) continue;
+    totalVisible += repos.length;
+
+    const header = document.createElement('div');
+    header.className = 'group-header';
+    var toggleChar = collapsedGroups.has(gm.key) ? '\u25B6' : '\u25BC';
+    header.innerHTML = '<span class="toggle">' + toggleChar + '</span>' +
+      '<span class="badge ' + gm.cls + '">' + gm.label + '</span>' +
+      '<span class="count">(' + repos.length + ')</span>';
+    (function(key) {
+      header.onclick = function() {
+        if (collapsedGroups.has(key)) collapsedGroups.delete(key);
+        else collapsedGroups.add(key);
+        renderRepoList();
+      };
+    })(gm.key);
+    container.appendChild(header);
+
+    if (!collapsedGroups.has(gm.key)) {
+      for (var ri = 0; ri < repos.length; ri++) {
+        (function(repo) {
+          const div = document.createElement('div');
+          div.className = 'repo-item' + (currentRepo === repo.full_name ? ' selected' : '');
+
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = selectedRepos.has(repo.full_name);
+          cb.onclick = function(e) {
+            e.stopPropagation();
+            if (cb.checked) selectedRepos.add(repo.full_name);
+            else selectedRepos.delete(repo.full_name);
+          };
+
+          const nameSpan = document.createElement('span');
+          nameSpan.className = 'repo-name';
+          nameSpan.textContent = repo.full_name;
+
+          const lockIcon = document.createElement('span');
+          lockIcon.className = 'lock-icon';
+          lockIcon.textContent = repo.isPrivate ? '\uD83D\uDD12' : '';
+
+          div.appendChild(cb);
+          div.appendChild(nameSpan);
+          div.appendChild(lockIcon);
+          div.onclick = function(e) {
+            if (e.target === cb) return;
+            currentRepo = repo.full_name;
+            renderRepoList();
+            loadRepoDetail(repo.full_name);
+          };
+          container.appendChild(div);
+        })(repos[ri]);
+      }
+    }
+  }
+
+  document.getElementById('repo-count').textContent = totalVisible > 0 ? '(' + totalVisible + ')' : '';
+}
+
+document.getElementById('repo-search').addEventListener('input', function() { renderRepoList(); });
+
+function selectAllVisible() {
+  const filter = document.getElementById('repo-search').value.trim().toLowerCase();
+  for (var i = 0; i < allRepos.length; i++) {
+    if (!filter || allRepos[i].full_name.toLowerCase().indexOf(filter) !== -1) {
+      selectedRepos.add(allRepos[i].full_name);
+    }
+  }
+  renderRepoList();
+}
+
+function deselectAll() {
+  selectedRepos.clear();
+  renderRepoList();
+}
+
+// ============================================================
+// Repo detail & collaborators
+// ============================================================
+async function loadRepoDetail(fullName) {
+  document.getElementById('detail-placeholder').style.display = 'none';
+  document.getElementById('detail-content').style.display = 'block';
+  document.getElementById('detail-repo-name').textContent = fullName;
+
+  const repo = allRepos.find(function(r) { return r.full_name === fullName; });
+  const badges = document.getElementById('detail-badges');
+  badges.innerHTML = '';
+
+  if (repo) {
+    const p = repo.permission || {};
+    const items = [
+      { label: 'admin', val: !!p.admin, color: 'var(--primary)' },
+      { label: 'push', val: !!p.push, color: 'var(--success)' },
+      { label: 'pull', val: !!p.pull, color: 'var(--text3)' },
+    ];
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      const span = document.createElement('span');
+      span.className = 'perm-badge' + (item.val ? ' perm-on' : ' perm-off');
+      span.style.background = item.val ? item.color : '#ddd';
+      span.textContent = item.label + ': ' + (item.val ? '\u2713' : '\u2717');
+      badges.appendChild(span);
+    }
+    if (repo.isPrivate) {
+      const span = document.createElement('span');
+      span.className = 'perm-badge perm-on';
+      span.style.background = 'var(--warning)';
+      span.textContent = '\uD83D\uDD12 \u79c1\u6709';
+      badges.appendChild(span);
+    }
+    if (repo.html_url) {
+      const a = document.createElement('a');
+      a.href = repo.html_url; a.target = '_blank';
+      a.className = 'repo-link';
+      a.textContent = '\u2197 \u6253\u5f00 Gitee';
+      badges.appendChild(a);
+    }
+  }
+
+  const collabList = document.getElementById('collab-list');
+  collabList.innerHTML = '<div class="loading-text">\u52a0\u8f7d\u4e2d\u2026</div>';
+
+  try {
+    const collabs = await giteeApiFetchAll('/repos/' + fullName + '/collaborators');
+    collabList.innerHTML = '';
+
+    if (collabs.length === 0) {
+      collabList.innerHTML = '<div class="loading-text">\u6682\u65e0\u534f\u4f5c\u8005</div>';
+      return;
+    }
+
+    for (var ci = 0; ci < collabs.length; ci++) {
+      (function(c) {
+        const div = document.createElement('div');
+        div.className = 'collab-item';
+
+        const avatar = document.createElement('img');
+        avatar.className = 'avatar';
+        avatar.src = c.avatar_url || '';
+        avatar.onerror = function() { avatar.style.display = 'none'; };
+
+        const info = document.createElement('div');
+        info.className = 'collab-info';
+        info.innerHTML = '<div class="collab-name">' + (c.name || c.login) + '</div><div class="collab-login">@' + c.login + '</div>';
+
+        const permSelect = document.createElement('select');
+        permSelect.innerHTML = '<option value="pull">\u53ea\u8bfb</option><option value="push">\u8bfb\u5199</option><option value="admin">\u7ba1\u7406\u5458</option>';
+        const cp = c.permissions || c.permission || {};
+        if (cp.admin) permSelect.value = 'admin';
+        else if (cp.push) permSelect.value = 'push';
+        else permSelect.value = 'pull';
+        permSelect.onchange = function() { updateCollabPermission(fullName, c.login, permSelect.value); };
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'btn btn-danger btn-sm';
+        removeBtn.textContent = '\u79fb\u9664';
+        removeBtn.onclick = function() { removeCollab(fullName, c.login); };
+
+        div.appendChild(avatar);
+        div.appendChild(info);
+        div.appendChild(permSelect);
+        div.appendChild(removeBtn);
+        collabList.appendChild(div);
+      })(collabs[ci]);
+    }
+  } catch (e) {
+    collabList.innerHTML = '<div class="err-text">\u52a0\u8f7d\u5931\u8d25: ' + e.message + '</div>';
+  }
+}
+
+// ============================================================
+// Collaborator CRUD
+// ============================================================
+async function updateCollabPermission(repoFullName, username, permission) {
+  setStatus('\u6b63\u5728\u66f4\u65b0 ' + username + ' \u5728 ' + repoFullName + ' \u7684\u6743\u9650\u2026');
+  try {
+    await giteeApi('PUT', '/repos/' + repoFullName + '/collaborators/' + username, { permission: permission });
+    setStatus('\u5df2\u66f4\u65b0: ' + username + ' -> ' + permission);
+    appendLog(repoFullName + ': ' + username + ' -> ' + permission, 'ok');
+  } catch (e) {
+    setStatus('\u66f4\u65b0\u5931\u8d25: ' + e.message);
+    appendLog(repoFullName + ': \u66f4\u65b0 ' + username + ' \u5931\u8d25 - ' + e.message, 'err');
+    loadRepoDetail(repoFullName);
+  }
+}
+
+async function removeCollab(repoFullName, username) {
+  if (!confirm('\u786e\u5b9a\u4ece ' + repoFullName + ' \u79fb\u9664 ' + username + '\uff1f')) return;
+  setStatus('\u6b63\u5728\u79fb\u9664 ' + username + '\u2026');
+  try {
+    await giteeApi('DELETE', '/repos/' + repoFullName + '/collaborators/' + username);
+    setStatus('\u5df2\u79fb\u9664: ' + username);
+    appendLog(repoFullName + ': \u5df2\u79fb\u9664 ' + username, 'ok');
+    loadRepoDetail(repoFullName);
+  } catch (e) {
+    setStatus('\u79fb\u9664\u5931\u8d25: ' + e.message);
+    appendLog(repoFullName + ': \u79fb\u9664 ' + username + ' \u5931\u8d25 - ' + e.message, 'err');
+  }
+}
+
+function promptAddCollab() {
+  if (!currentRepo) return;
+  var overlay = document.createElement('div'); overlay.className = 'modal-overlay';
+  var modal = document.createElement('div'); modal.className = 'modal';
+  var h3 = document.createElement('h3'); h3.textContent = '\u6dfb\u52a0\u534f\u4f5c\u8005'; modal.appendChild(h3);
+
+  // Username with search
+  var userLabel = document.createElement('label'); userLabel.textContent = '\u7528\u6237\u540d'; modal.appendChild(userLabel);
+  var userWrap = document.createElement('div'); userWrap.className = 'user-search-wrap';
+  var userInput = document.createElement('input'); userInput.type = 'text'; userInput.placeholder = '';
+  var userDropdown = document.createElement('div'); userDropdown.className = 'user-dropdown';
+  userWrap.appendChild(userInput);
+  userWrap.appendChild(userDropdown);
+  modal.appendChild(userWrap);
+  setupUserSearch(userInput, userDropdown);
+
+  // Permission select
+  var permLabel = document.createElement('label'); permLabel.textContent = '\u6743\u9650'; modal.appendChild(permLabel);
+  var permSelect = document.createElement('select');
+  permSelect.innerHTML = '<option value="push">\u8bfb\u5199 (push)</option><option value="pull">\u53ea\u8bfb (pull)</option><option value="admin">\u7ba1\u7406\u5458 (admin)</option>';
+  permSelect.value = 'push';
+  modal.appendChild(permSelect);
+
+  var actions = document.createElement('div'); actions.className = 'modal-actions';
+  var cancelBtn = document.createElement('button'); cancelBtn.className = 'btn btn-ghost'; cancelBtn.textContent = '\u53d6\u6d88';
+  cancelBtn.onclick = function() { overlay.remove(); };
+  var confirmBtn = document.createElement('button'); confirmBtn.className = 'btn btn-primary'; confirmBtn.textContent = '\u786e\u8ba4';
+  confirmBtn.onclick = async function() {
+    var username = userInput.value.trim();
+    var permission = permSelect.value;
+    if (!username) { setStatus('\u8bf7\u8f93\u5165\u7528\u6237\u540d'); return; }
+    try {
+      await giteeApi('PUT', '/repos/' + currentRepo + '/collaborators/' + username, { permission: permission });
+      appendLog(currentRepo + ': \u5df2\u6dfb\u52a0 ' + username + ' (' + permission + ')', 'ok');
+      overlay.remove();
+      loadRepoDetail(currentRepo);
+    } catch (e) {
+      setStatus('\u64cd\u4f5c\u5931\u8d25: ' + e.message);
+      appendLog('\u64cd\u4f5c\u5931\u8d25: ' + e.message, 'err');
+    }
+  };
+  actions.appendChild(cancelBtn); actions.appendChild(confirmBtn); modal.appendChild(actions);
+  overlay.appendChild(modal);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('modal-container').appendChild(overlay);
+  setTimeout(function() { userInput.focus(); }, 50);
+}
+
+// ============================================================
+// Batch operations
+// ============================================================
+async function batchAddCollab() {
+  const username = document.getElementById('batch-user').value.trim();
+  const permission = document.getElementById('batch-perm').value;
+  if (!username) { setStatus('\u8bf7\u8f93\u5165\u7528\u6237\u540d'); return; }
+  if (selectedRepos.size === 0) { setStatus('\u8bf7\u5148\u9009\u62e9\u4ed3\u5e93'); return; }
+  setConfig({ token: getToken(), lastUser: username });
+
+  const repos = Array.from(selectedRepos);
+  if (!confirm('\u786e\u5b9a\u4e3a ' + username + ' \u6dfb\u52a0 ' + permission + ' \u6743\u9650\u5230 ' + repos.length + ' \u4e2a\u4ed3\u5e93\uff1f')) return;
+
+  clearLog();
+  switchTab('log');
+  appendLog('\u5f00\u59cb\u6279\u91cf\u6dfb\u52a0: ' + username + ' -> ' + permission + ' (' + repos.length + ' \u4e2a\u4ed3\u5e93)', 'info');
+  setStatus('\u6279\u91cf\u6dfb\u52a0\u4e2d\u2026 0/' + repos.length);
+
+  let ok = 0, fail = 0;
+  for (let i = 0; i < repos.length; i++) {
+    setStatus('\u6279\u91cf\u6dfb\u52a0\u4e2d\u2026 ' + (i + 1) + '/' + repos.length, repos[i]);
+    try {
+      await giteeApi('PUT', '/repos/' + repos[i] + '/collaborators/' + username, { permission: permission });
+      appendLog('\u2713 ' + repos[i], 'ok');
+      ok++;
+    } catch (e) {
+      appendLog('\u2717 ' + repos[i] + ': ' + e.message, 'err');
+      fail++;
+    }
+  }
+  appendLog('\u5b8c\u6210: ' + ok + ' \u6210\u529f, ' + fail + ' \u5931\u8d25', ok > 0 && fail === 0 ? 'ok' : 'err');
+  setStatus('\u6279\u91cf\u6dfb\u52a0\u5b8c\u6210: ' + ok + ' \u6210\u529f, ' + fail + ' \u5931\u8d25');
+}
+
+async function batchRemoveCollab() {
+  const username = document.getElementById('batch-user').value.trim();
+  if (!username) { setStatus('\u8bf7\u8f93\u5165\u7528\u6237\u540d'); return; }
+  if (selectedRepos.size === 0) { setStatus('\u8bf7\u5148\u9009\u62e9\u4ed3\u5e93'); return; }
+
+  const repos = Array.from(selectedRepos);
+  if (!confirm('\u786e\u5b9a\u4ece ' + repos.length + ' \u4e2a\u4ed3\u5e93\u79fb\u9664 ' + username + '\uff1f')) return;
+
+  clearLog();
+  switchTab('log');
+  appendLog('\u5f00\u59cb\u6279\u91cf\u79fb\u9664: ' + username + ' (' + repos.length + ' \u4e2a\u4ed3\u5e93)', 'info');
+  setStatus('\u6279\u91cf\u79fb\u9664\u4e2d\u2026 0/' + repos.length);
+
+  let ok = 0, fail = 0;
+  for (let i = 0; i < repos.length; i++) {
+    setStatus('\u6279\u91cf\u79fb\u9664\u4e2d\u2026 ' + (i + 1) + '/' + repos.length, repos[i]);
+    try {
+      await giteeApi('DELETE', '/repos/' + repos[i] + '/collaborators/' + username);
+      appendLog('\u2713 ' + repos[i], 'ok');
+      ok++;
+    } catch (e) {
+      appendLog('\u2717 ' + repos[i] + ': ' + e.message, 'err');
+      fail++;
+    }
+  }
+  appendLog('\u5b8c\u6210: ' + ok + ' \u6210\u529f, ' + fail + ' \u5931\u8d25', ok > 0 && fail === 0 ? 'ok' : 'err');
+  setStatus('\u6279\u91cf\u79fb\u9664\u5b8c\u6210: ' + ok + ' \u6210\u529f, ' + fail + ' \u5931\u8d25');
+}
+
+// ============================================================
+// Tabs
+// ============================================================
+function switchTab(tab) {
+  document.getElementById('tab-detail').style.display = tab === 'detail' ? '' : 'none';
+  document.getElementById('tab-log').style.display = tab === 'log' ? '' : 'none';
+  const btns = document.querySelectorAll('#tab-bar button');
+  btns[0].classList.toggle('active', tab === 'detail');
+  btns[1].classList.toggle('active', tab === 'log');
+}
+
+// ============================================================
+// Modal helper
+// ============================================================
+function showModal(title, inputs, selects, onConfirm) {
+  const overlay = document.createElement('div'); overlay.className = 'modal-overlay';
+  const modal = document.createElement('div'); modal.className = 'modal';
+  const h3 = document.createElement('h3'); h3.textContent = title; modal.appendChild(h3);
+  const fields = {};
+
+  for (var i = 0; i < inputs.length; i++) {
+    var f = inputs[i];
+    const label = document.createElement('label'); label.textContent = f.label; modal.appendChild(label);
+    const input = document.createElement('input'); input.type = 'text'; input.value = f.value || ''; input.placeholder = f.placeholder || '';
+    fields[f.key] = input; modal.appendChild(input);
+  }
+
+  var sels = selects || [];
+  for (var si = 0; si < sels.length; si++) {
+    var s = sels[si];
+    const label = document.createElement('label'); label.textContent = s.label; modal.appendChild(label);
+    const select = document.createElement('select');
+    for (var oi = 0; oi < s.options.length; oi++) {
+      const o = document.createElement('option'); o.value = s.options[oi].value; o.textContent = s.options[oi].text; select.appendChild(o);
+    }
+    if (s.defaultValue) select.value = s.defaultValue;
+    fields[s.key] = select; modal.appendChild(select);
+  }
+
+  const actions = document.createElement('div'); actions.className = 'modal-actions';
+  const cancelBtn = document.createElement('button'); cancelBtn.className = 'btn btn-ghost'; cancelBtn.textContent = '\u53d6\u6d88';
+  cancelBtn.onclick = function() { overlay.remove(); };
+  const confirmBtn = document.createElement('button'); confirmBtn.className = 'btn btn-primary'; confirmBtn.textContent = '\u786e\u8ba4';
+  confirmBtn.onclick = async function() {
+    const values = {};
+    for (const k in fields) values[k] = fields[k].value.trim();
+    try { await onConfirm(values); overlay.remove(); }
+    catch (e) { setStatus('\u64cd\u4f5c\u5931\u8d25: ' + e.message); appendLog('\u64cd\u4f5c\u5931\u8d25: ' + e.message, 'err'); }
+  };
+  actions.appendChild(cancelBtn); actions.appendChild(confirmBtn); modal.appendChild(actions);
+  overlay.appendChild(modal);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('modal-container').appendChild(overlay);
+  var first = null;
+  for (var k in fields) { first = fields[k]; break; }
+  if (first) setTimeout(function() { first.focus(); }, 50);
+}
+
+document.getElementById('token-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') loadAllRepos();
+});
+
+// ============================================================
+// User search (autocomplete via Gitee search API)
+// ============================================================
+var _userSearchTimer = null;
+var _userSearchCache = {};
+
+function setupUserSearch(inputEl, dropdownEl) {
+  inputEl.addEventListener('input', function() {
+    clearTimeout(_userSearchTimer);
+    var q = inputEl.value.trim();
+    if (q.length < 2) { closeUserDropdown(dropdownEl); return; }
+    _userSearchTimer = setTimeout(function() { doUserSearch(q, dropdownEl, inputEl); }, 300);
+  });
+  inputEl.addEventListener('focus', function() {
+    var q = inputEl.value.trim();
+    if (q.length >= 2) doUserSearch(q, dropdownEl, inputEl);
+  });
+  inputEl.addEventListener('blur', function() {
+    setTimeout(function() { closeUserDropdown(dropdownEl); }, 200);
+  });
+  inputEl.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeUserDropdown(dropdownEl);
+  });
+}
+
+async function doUserSearch(query, dropdownEl, inputEl) {
+  if (_userSearchCache[query]) {
+    renderUserDropdown(_userSearchCache[query], dropdownEl, inputEl);
+    return;
+  }
+  dropdownEl.innerHTML = '<div class="user-dropdown-hint">\u641c\u7d22\u4e2d\u2026</div>';
+  dropdownEl.classList.add('open');
+  try {
+    var token = getToken();
+    if (!token) return;
+    var url = 'https://gitee.com/api/v5/search/users?access_token=' + encodeURIComponent(token) + '&q=' + encodeURIComponent(query) + '&per_page=10';
+    var r = await fetch(url);
+    if (!r.ok) throw new Error('API ' + r.status);
+    var data = await r.json();
+    _userSearchCache[query] = data;
+    renderUserDropdown(data, dropdownEl, inputEl);
+  } catch (e) {
+    dropdownEl.innerHTML = '<div class="user-dropdown-hint">\u641c\u7d22\u5931\u8d25</div>';
+  }
+}
+
+function renderUserDropdown(users, dropdownEl, inputEl) {
+  dropdownEl.innerHTML = '';
+  if (!users || users.length === 0) {
+    dropdownEl.innerHTML = '<div class="user-dropdown-hint">\u672a\u627e\u5230\u7528\u6237</div>';
+    dropdownEl.classList.add('open');
+    return;
+  }
+  for (var i = 0; i < users.length; i++) {
+    (function(u) {
+      var div = document.createElement('div');
+      div.className = 'user-dropdown-item';
+      var img = document.createElement('img');
+      img.src = u.avatar_url || '';
+      img.onerror = function() { img.style.display = 'none'; };
+      var info = document.createElement('div');
+      info.innerHTML = '<div class="ud-name">' + (u.name || u.login) + '</div><div class="ud-login">@' + u.login + '</div>';
+      div.appendChild(img);
+      div.appendChild(info);
+      div.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        inputEl.value = u.login;
+        closeUserDropdown(dropdownEl);
+      });
+      dropdownEl.appendChild(div);
+    })(users[i]);
+  }
+  dropdownEl.classList.add('open');
+}
+
+function closeUserDropdown(dropdownEl) {
+  dropdownEl.classList.remove('open');
+}
+
+// Attach to batch-user input
+(function() {
+  var batchInput = document.getElementById('batch-user');
+  var batchDropdown = document.getElementById('batch-user-dropdown');
+  if (batchInput && batchDropdown) setupUserSearch(batchInput, batchDropdown);
+})();

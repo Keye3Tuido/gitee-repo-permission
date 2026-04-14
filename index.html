@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gitee &#20179;&#24211;&#26435;&#38480;&#31649;&#29702;&#22120;</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f0f2f5; --card: #fff; --border: #e0e3e8;
+  --text: #1a1a2e; --text2: #555; --text3: #888;
+  --primary: #c71d23; --primary-hover: #a5181d;
+  --danger: #e74c3c; --danger-hover: #c0392b;
+  --success: #27ae60; --warning: #e67e22;
+  --hover-bg: #f7f8fa; --selected-bg: #fef0f0;
+  --mono: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg); color: var(--text); min-height: 100vh;
+}
+.app { display: flex; flex-direction: column; height: 100vh; }
+.topbar {
+  background: var(--card); border-bottom: 1px solid var(--border);
+  padding: .6rem 1rem; display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+}
+.topbar-title { font-weight: 700; font-size: 1rem; white-space: nowrap; color: var(--primary); }
+.topbar input {
+  padding: .4rem .6rem; border: 1px solid var(--border); border-radius: 6px;
+  font-size: .85rem; font-family: inherit; background: var(--card);
+}
+.topbar input:focus { outline: none; border-color: var(--primary); }
+.btn {
+  display: inline-flex; align-items: center; gap: .3rem;
+  padding: .4rem .75rem; border: none; border-radius: 6px;
+  font-size: .8rem; cursor: pointer; font-family: inherit;
+  transition: background .15s, opacity .15s; white-space: nowrap;
+}
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+.btn-success { background: var(--success); color: #fff; }
+.btn-success:hover:not(:disabled) { background: #219a52; }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-danger:hover:not(:disabled) { background: var(--danger-hover); }
+.btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
+.btn-ghost:hover:not(:disabled) { background: var(--hover-bg); }
+.btn-sm { padding: .3rem .5rem; font-size: .75rem; }
+.main-area { display: flex; flex: 1; overflow: hidden; }
+.sidebar {
+  width: 380px; min-width: 280px; background: var(--card);
+  border-right: 1px solid var(--border); display: flex; flex-direction: column;
+}
+.sidebar-header {
+  padding: .6rem .75rem; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.sidebar-header span { font-size: .9rem; font-weight: 600; }
+.sidebar-search {
+  padding: .5rem .75rem; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 4px;
+}
+.sidebar-search input {
+  flex: 1; padding: .35rem .6rem; border: 1px solid var(--border);
+  border-radius: 6px; font-size: .8rem; font-family: inherit;
+}
+.sidebar-search input:focus { outline: none; border-color: var(--primary); }
+.repo-list-container { flex: 1; overflow-y: auto; padding: .25rem 0; }
+.group-header {
+  padding: .5rem .75rem; font-size: .8rem; font-weight: 700;
+  color: var(--text2); background: var(--bg); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: .5rem; cursor: pointer; user-select: none;
+  position: sticky; top: 0; z-index: 1;
+}
+.group-header .badge {
+  font-size: .7rem; padding: .15rem .5rem; border-radius: 10px; color: #fff;
+}
+.group-header .badge.admin { background: var(--primary); }
+.group-header .badge.push { background: var(--success); }
+.group-header .badge.pull { background: var(--text3); }
+.group-header .toggle { font-size: .7rem; color: var(--text3); }
+.group-header .count { font-size: .75rem; color: var(--text3); font-weight: 400; }
+.repo-item {
+  display: flex; align-items: center; padding: .45rem .75rem;
+  cursor: pointer; font-size: .8rem; gap: .5rem;
+  border-left: 3px solid transparent;
+}
+.repo-item:hover { background: var(--hover-bg); }
+.repo-item.selected { background: var(--selected-bg); border-left-color: var(--primary); }
+.repo-item .repo-name {
+  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--mono); font-size: .78rem;
+}
+.repo-item .lock-icon { font-size: .7rem; flex-shrink: 0; }
+.repo-item input[type="checkbox"] { flex-shrink: 0; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <span class="topbar-title">&#128273; Gitee &#20179;&#24211;&#26435;&#38480;&#31649;&#29702;&#22120;</span>
+    <input type="password" id="token-input" placeholder="Gitee Personal Access Token" style="width:280px">
+    <button class="btn btn-ghost btn-sm" onclick="toggleTokenVisibility()">&#128065;</button>
+    <button class="btn btn-primary" onclick="loadAllRepos()" id="load-btn">&#21152;&#36733;&#20179;&#24211;</button>
+    <label style="font-size:.8rem;display:flex;align-items:center;gap:.3rem;cursor:pointer">
+      <input type="checkbox" id="org-toggle" checked> &#21253;&#21547;&#32452;&#32455;&#20179;&#24211;
+    </label>
+  </div>
+
+  <div class="main-area">
+    <div class="sidebar" id="repos-panel">
+      <div class="sidebar-header">
+        <span>&#20179;&#24211;&#21015;&#34920; <span id="repo-count" style="color:var(--text3);font-weight:400"></span></span>
+        <div style="display:flex;gap:.25rem">
+          <button class="btn btn-ghost btn-sm" onclick="selectAllVisible()" title="&#20840;&#36873;">&#9745;</button>
+          <button class="btn btn-ghost btn-sm" onclick="deselectAll()" title="&#21462;&#28040;&#20840;&#36873;">&#9744;</button>
+        </div>
+      </div>
+      <div class="sidebar-search">
+        <input type="text" id="repo-search" placeholder="&#128269; &#25628;&#32034;&#20179;&#24211;..." autocomplete="off">
+      </div>
+      <div class="repo-list-container" id="repo-list"></div>
+      <div class="batch-bar">
+        <span style="font-size:.8rem;font-weight:600">&#25209;&#37327;&#25805;&#20316;:</span>
+        <div class="user-search-wrap" id="batch-user-wrap">
+          <input type="text" id="batch-user" placeholder="&#29992;&#25143;&#21517;" autocomplete="off">
+          <div class="user-dropdown" id="batch-user-dropdown"></div>
+        </div>
+        <select id="batch-perm">
+          <option value="push">&#35835;&#20889; (push)</option>
+          <option value="pull">&#21482;&#35835; (pull)</option>
+          <option value="admin">&#31649;&#29702;&#21592; (admin)</option>
+        </select>
+        <button class="btn btn-success btn-sm" onclick="batchAddCollab()">+ &#28155;&#21152;</button>
+        <button class="btn btn-danger btn-sm" onclick="batchRemoveCollab()">- &#31227;&#38500;</button>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="tab-bar" id="tab-bar">
+        <button class="active" onclick="switchTab('detail')">&#128203; &#20179;&#24211;&#35814;&#24773;</button>
+        <button onclick="switchTab('log')">&#128220; &#25805;&#20316;&#26085;&#24535;</button>
+      </div>
+      <div id="tab-detail" class="content-body">
+        <div class="placeholder-msg" id="detail-placeholder">
+          <span style="font-size:2rem">&#128273;</span>
+          <span>&#36755;&#20837; Token &#24182;&#21152;&#36733;&#20179;&#24211;&#65292;&#28982;&#21518;&#36873;&#25321;&#20179;&#24211;&#26597;&#30475;&#35814;&#24773;</span>
+          <span style="font-size:.75rem;color:var(--text3)">&#25903;&#25345;&#25209;&#37327;&#31649;&#29702;&#21327;&#20316;&#32773;&#26435;&#38480;</span>
+        </div>
+        <div id="detail-content" style="display:none">
+          <h3 id="detail-repo-name" style="font-size:1rem;margin-bottom:.75rem"></h3>
+          <div style="display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap" id="detail-badges"></div>
+          <div style="margin-bottom:1rem">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+              <span style="font-weight:600;font-size:.9rem">&#21327;&#20316;&#32773;</span>
+              <button class="btn btn-success btn-sm" onclick="promptAddCollab()">+ &#28155;&#21152;&#21327;&#20316;&#32773;</button>
+            </div>
+            <div id="collab-list"></div>
+          </div>
+        </div>
+      </div>
+      <div id="tab-log" class="content-body" style="display:none">
+        <div class="log-panel" id="log-panel" style="max-height:none;min-height:200px">
+          <div class="log-info">&#31561;&#24453;&#25805;&#20316;&#8230;</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span id="status-left">&#23601;&#32490;</span>
+    <span id="status-right"></span>
+  </div>
+</div>
+
+<div id="modal-container"></div>
+
+<style>
+.content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.content-body { flex: 1; overflow-y: auto; padding: 1rem; background: var(--card); }
+.collab-item {
+  display: flex; align-items: center; padding: .5rem .75rem;
+  border-bottom: 1px solid var(--border); gap: .75rem; font-size: .85rem;
+}
+.collab-item:last-child { border-bottom: none; }
+.collab-item .avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--bg); }
+.collab-item .collab-info { flex: 1; }
+.collab-item .collab-name { font-weight: 600; font-size: .85rem; }
+.collab-item .collab-login { color: var(--text3); font-size: .75rem; font-family: var(--mono); }
+.collab-item select {
+  padding: .3rem .5rem; border: 1px solid var(--border); border-radius: 6px;
+  font-size: .8rem; font-family: inherit; background: var(--card);
+}
+.batch-bar {
+  padding: .5rem .75rem; border-top: 1px solid var(--border);
+  background: var(--bg); display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+}
+.batch-bar input {
+  padding: .35rem .6rem; border: 1px solid var(--border); border-radius: 6px;
+  font-size: .8rem; font-family: inherit; width: 160px;
+}
+.batch-bar select {
+  padding: .35rem .5rem; border: 1px solid var(--border); border-radius: 6px;
+  font-size: .8rem; font-family: inherit; background: var(--card);
+}
+.statusbar {
+  background: var(--card); border-top: 1px solid var(--border);
+  padding: .35rem 1rem; font-size: .75rem; color: var(--text3);
+  display: flex; justify-content: space-between;
+}
+.placeholder-msg {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  color: var(--text3); font-size: .95rem; flex-direction: column; gap: .5rem;
+}
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.4);
+  display: flex; align-items: center; justify-content: center; z-index: 100;
+}
+.modal {
+  background: var(--card); border-radius: 12px; padding: 1.5rem;
+  min-width: 400px; max-width: 90vw; box-shadow: 0 8px 32px rgba(0,0,0,.15);
+}
+.modal h3 { font-size: 1rem; margin-bottom: 1rem; }
+.modal label { display: block; font-size: .8rem; color: var(--text2); margin-bottom: .25rem; margin-top: .75rem; }
+.modal input, .modal select {
+  width: 100%; padding: .45rem .6rem; border: 1px solid var(--border);
+  border-radius: 6px; font-size: .85rem; font-family: inherit;
+}
+.modal input:focus, .modal select:focus { outline: none; border-color: var(--primary); }
+.modal-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1.25rem; }
+.log-panel {
+  max-height: 200px; overflow-y: auto; font-family: var(--mono); font-size: .75rem;
+  background: #1e1e2e; color: #cdd6f4; border-radius: 6px; padding: .5rem .75rem;
+  margin-top: .75rem;
+}
+.log-panel .log-ok { color: #a6e3a1; }
+.log-panel .log-err { color: #f38ba8; }
+.log-panel .log-info { color: #89b4fa; }
+.tab-bar { display: flex; border-bottom: 1px solid var(--border); background: var(--card); }
+.tab-bar button {
+  padding: .5rem 1rem; border: none; background: none; font-size: .8rem;
+  cursor: pointer; color: var(--text3); border-bottom: 2px solid transparent; font-family: inherit;
+}
+.tab-bar button.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+.perm-badge { font-size:.75rem; padding:.2rem .5rem; border-radius:10px; color:#fff; }
+.repo-link { font-size:.75rem; color:var(--primary); text-decoration:none; }
+.repo-link:hover { text-decoration: underline; }
+.loading-text { color:var(--text3); font-size:.8rem; padding:.5rem; }
+.err-text { color:var(--danger); font-size:.8rem; padding:.5rem; }
+/* User search dropdown */
+.user-search-wrap { position: relative; display: inline-block; }
+.user-search-wrap input { width: 160px; }
+.user-dropdown {
+  display: none; position: absolute; bottom: 100%; left: 0; z-index: 60;
+  width: max-content; min-width: 100%;
+  background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+  max-height: 220px; overflow-y: auto;
+  box-shadow: 0 -4px 16px rgba(0,0,0,.1); margin-bottom: 2px;
+}
+.user-dropdown.open { display: block; }
+.user-dropdown-item {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .4rem .6rem; cursor: pointer; font-size: .8rem;
+}
+.user-dropdown-item:hover { background: var(--hover-bg); }
+.user-dropdown-item img {
+  width: 24px; height: 24px; border-radius: 50%; background: var(--bg); flex-shrink: 0;
+}
+.user-dropdown-item .ud-name { font-weight: 600; font-size: .8rem; }
+.user-dropdown-item .ud-login { color: var(--text3); font-size: .75rem; font-family: var(--mono); }
+.user-dropdown-hint { padding: .4rem .6rem; font-size: .75rem; color: var(--text3); }
+/* Modal user search */
+.modal .user-search-wrap { display: block; width: 100%; }
+.modal .user-search-wrap input { width: 100%; }
+.modal .user-dropdown { bottom: auto; top: 100%; margin-top: 2px; margin-bottom: 0;
+  box-shadow: 0 4px 16px rgba(0,0,0,.1); }
+@media (max-width: 768px) {
+  .main-area { flex-direction: column; }
+  .sidebar { width: 100%; min-width: 0; border-right: none; border-bottom: 1px solid var(--border); max-height: 45vh; }
+  .modal { min-width: auto; width: calc(100vw - 2rem); }
+  .batch-bar { flex-direction: column; align-items: stretch; }
+  .batch-bar input { width: 100%; }
+}
+</style>
+
+<script src="app.js"></script>
+</body>
+</html>
