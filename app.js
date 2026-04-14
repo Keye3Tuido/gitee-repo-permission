@@ -338,6 +338,14 @@ async function loadRepoDetail(fullName) {
   var collabSearchEl = document.getElementById('collab-search');
   if (collabSearchEl) collabSearchEl.value = '';
 
+  // Enable/disable add button based on admin permission
+  var addBtn = document.getElementById('add-collab-btn');
+  if (addBtn) {
+    var isAdmin = repo && repo.permission && repo.permission.admin;
+    addBtn.disabled = !isAdmin;
+    addBtn.title = isAdmin ? '' : '需要管理员权限才能添加协作者';
+  }
+
   try {
     const collabs = await giteeApiFetchAll('/repos/' + fullName + '/collaborators');
     currentCollabs = collabs;
@@ -397,18 +405,32 @@ function renderCollabList(filter) {
       info.className = 'collab-info';
       info.innerHTML = '<div class="collab-name">' + (c.name || c.login) + '</div><div class="collab-login">@' + c.login + '</div>';
 
+      // Check if current user has admin permission on this repo
+      var repo = allRepos.find(function(r) { return r.full_name === fullName; });
+      var isAdmin = repo && repo.permission && repo.permission.admin;
+
       const permSelect = document.createElement('select');
       permSelect.innerHTML = '<option value="pull">\u53ea\u8bfb</option><option value="push">\u8bfb\u5199</option><option value="admin">\u7ba1\u7406\u5458</option>';
       const cp = c.permissions || c.permission || {};
       if (cp.admin) permSelect.value = 'admin';
       else if (cp.push) permSelect.value = 'push';
       else permSelect.value = 'pull';
-      permSelect.onchange = function() { updateCollabPermission(fullName, c.login, permSelect.value); };
+      if (!isAdmin) {
+        permSelect.disabled = true;
+        permSelect.title = '需要管理员权限才能修改';
+      } else {
+        permSelect.onchange = function() { updateCollabPermission(fullName, c.login, permSelect.value); };
+      }
 
       const removeBtn = document.createElement('button');
       removeBtn.className = 'btn btn-danger btn-sm';
       removeBtn.textContent = '\u79fb\u9664';
-      removeBtn.onclick = function() { removeCollab(fullName, c.login); };
+      if (!isAdmin) {
+        removeBtn.disabled = true;
+        removeBtn.title = '需要管理员权限才能移除';
+      } else {
+        removeBtn.onclick = function() { removeCollab(fullName, c.login); };
+      }
 
       div.appendChild(avatar);
       div.appendChild(info);
@@ -439,6 +461,14 @@ function getCurrentPermLevel(repoFullName, username) {
 }
 
 async function updateCollabPermission(repoFullName, username, permission) {
+  // Check admin permission
+  var repo = allRepos.find(function(r) { return r.full_name === repoFullName; });
+  if (!repo || !repo.permission || !repo.permission.admin) {
+    setStatus('无权操作：你不是 ' + repoFullName + ' 的管理员');
+    appendLog(repoFullName + ': 无管理员权限，无法修改协作者', 'err');
+    return;
+  }
+
   var permLabels = { pull: '只读', push: '读写', admin: '管理员' };
   var permLabel = permLabels[permission] || permission;
 
@@ -478,6 +508,14 @@ async function updateCollabPermission(repoFullName, username, permission) {
 }
 
 async function removeCollab(repoFullName, username) {
+  // Check admin permission
+  var repo = allRepos.find(function(r) { return r.full_name === repoFullName; });
+  if (!repo || !repo.permission || !repo.permission.admin) {
+    setStatus('无权操作：你不是 ' + repoFullName + ' 的管理员');
+    appendLog(repoFullName + ': 无管理员权限，无法移除协作者', 'err');
+    return;
+  }
+
   if (currentUser && username.toLowerCase() === currentUser.toLowerCase()) {
     if (!confirm('⛔ 警告：你正在将【自己】从 ' + repoFullName + ' 移除！\n\n移除后你将无法访问该仓库，且无法自行恢复！\n\n确定要继续吗？')) return;
   } else {
@@ -497,6 +535,12 @@ async function removeCollab(repoFullName, username) {
 
 function promptAddCollab() {
   if (!currentRepo) return;
+  // Check admin permission
+  var repo = allRepos.find(function(r) { return r.full_name === currentRepo; });
+  if (!repo || !repo.permission || !repo.permission.admin) {
+    setStatus('无权操作：你不是 ' + currentRepo + ' 的管理员');
+    return;
+  }
   var overlay = document.createElement('div'); overlay.className = 'modal-overlay';
   var modal = document.createElement('div'); modal.className = 'modal';
   var h3 = document.createElement('h3'); h3.textContent = '\u6dfb\u52a0\u534f\u4f5c\u8005'; modal.appendChild(h3);
@@ -556,11 +600,22 @@ async function batchAddCollab() {
   if (selectedRepos.size === 0) { setStatus('\u8bf7\u5148\u9009\u62e9\u4ed3\u5e93'); return; }
   setConfig({ token: getToken(), lastUser: username });
 
-  const repos = Array.from(selectedRepos);
+  const allSelected = Array.from(selectedRepos);
+  // Filter to repos where current user has admin permission
+  var repos = allSelected.filter(function(fn) {
+    var r = allRepos.find(function(x) { return x.full_name === fn; });
+    return r && r.permission && r.permission.admin;
+  });
+  var skipped = allSelected.length - repos.length;
+  if (repos.length === 0) {
+    setStatus('所选仓库中没有你拥有管理员权限的仓库');
+    if (skipped > 0) appendLog('已跳过 ' + skipped + ' 个无管理员权限的仓库', 'err');
+    return;
+  }
+
   var isSelf = currentUser && username.toLowerCase() === currentUser.toLowerCase();
   var confirmMsg;
   if (isSelf) {
-    // Check if any selected repo would be a demotion
     var newLevel = PERM_LEVEL[permission] !== undefined ? PERM_LEVEL[permission] : -1;
     var demotionCount = 0;
     for (var di = 0; di < repos.length; di++) {
@@ -579,10 +634,12 @@ async function batchAddCollab() {
   } else {
     confirmMsg = '\u786e\u5b9a\u4e3a ' + username + ' \u6dfb\u52a0 ' + permission + ' \u6743\u9650\u5230 ' + repos.length + ' \u4e2a\u4ed3\u5e93\uff1f';
   }
+  if (skipped > 0) confirmMsg += '\n\n（已自动跳过 ' + skipped + ' 个无管理员权限的仓库）';
   if (!confirm(confirmMsg)) return;
 
   clearLog();
   switchTab('log');
+  if (skipped > 0) appendLog('已跳过 ' + skipped + ' 个无管理员权限的仓库', 'info');
   appendLog('\u5f00\u59cb\u6279\u91cf\u6dfb\u52a0: ' + username + ' -> ' + permission + ' (' + repos.length + ' \u4e2a\u4ed3\u5e93)', 'info');
   setStatus('\u6279\u91cf\u6dfb\u52a0\u4e2d\u2026 0/' + repos.length);
 
@@ -607,7 +664,18 @@ async function batchRemoveCollab() {
   if (!username) { setStatus('\u8bf7\u8f93\u5165\u7528\u6237\u540d'); return; }
   if (selectedRepos.size === 0) { setStatus('\u8bf7\u5148\u9009\u62e9\u4ed3\u5e93'); return; }
 
-  const repos = Array.from(selectedRepos);
+  const allSelected = Array.from(selectedRepos);
+  var repos = allSelected.filter(function(fn) {
+    var r = allRepos.find(function(x) { return x.full_name === fn; });
+    return r && r.permission && r.permission.admin;
+  });
+  var skipped = allSelected.length - repos.length;
+  if (repos.length === 0) {
+    setStatus('所选仓库中没有你拥有管理员权限的仓库');
+    if (skipped > 0) appendLog('已跳过 ' + skipped + ' 个无管理员权限的仓库', 'err');
+    return;
+  }
+
   var isSelf = currentUser && username.toLowerCase() === currentUser.toLowerCase();
   var confirmMsg;
   if (isSelf) {
@@ -615,10 +683,12 @@ async function batchRemoveCollab() {
   } else {
     confirmMsg = '\u786e\u5b9a\u4ece ' + repos.length + ' \u4e2a\u4ed3\u5e93\u79fb\u9664 ' + username + '\uff1f';
   }
+  if (skipped > 0) confirmMsg += '\n\n（已自动跳过 ' + skipped + ' 个无管理员权限的仓库）';
   if (!confirm(confirmMsg)) return;
 
   clearLog();
   switchTab('log');
+  if (skipped > 0) appendLog('已跳过 ' + skipped + ' 个无管理员权限的仓库', 'info');
   appendLog('\u5f00\u59cb\u6279\u91cf\u79fb\u9664: ' + username + ' (' + repos.length + ' \u4e2a\u4ed3\u5e93)', 'info');
   setStatus('\u6279\u91cf\u79fb\u9664\u4e2d\u2026 0/' + repos.length);
 
