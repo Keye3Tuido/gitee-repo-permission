@@ -93,6 +93,8 @@ body {
 }
 .repo-item .lock-icon { font-size: .7rem; flex-shrink: 0; }
 .repo-item input[type="checkbox"] { flex-shrink: 0; cursor: pointer; }
+/* Mobile tabs hidden on desktop */
+.mobile-tabs { display: none; }
 </style>
 </head>
 <body>
@@ -107,6 +109,11 @@ body {
     </label>
   </div>
 
+  <div class="mobile-tabs" id="mobile-tabs">
+    <button class="active" onclick="switchMobileTab('repos')">&#128218; &#20179;&#24211;</button>
+    <button onclick="switchMobileTab('detail')">&#128203; &#35814;&#24773;</button>
+    <button onclick="switchMobileTab('log')">&#128220; &#26085;&#24535;</button>
+  </div>
   <div class="main-area">
     <div class="sidebar" id="repos-panel">
       <div class="sidebar-header">
@@ -152,8 +159,11 @@ body {
           <div style="display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap" id="detail-badges"></div>
           <div style="margin-bottom:1rem">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
-              <span style="font-weight:600;font-size:.9rem">&#21327;&#20316;&#32773;</span>
+              <span style="font-weight:600;font-size:.9rem">&#21327;&#20316;&#32773; <span id="collab-count" style="color:var(--text3);font-weight:400;font-size:.8rem"></span></span>
               <button class="btn btn-success btn-sm" onclick="promptAddCollab()">+ &#28155;&#21152;&#21327;&#20316;&#32773;</button>
+            </div>
+            <div class="collab-search-bar">
+              <input type="text" id="collab-search" placeholder="&#128269; &#25628;&#32034;&#21327;&#20316;&#32773;..." autocomplete="off">
             </div>
             <div id="collab-list"></div>
           </div>
@@ -247,6 +257,14 @@ body {
 .repo-link:hover { text-decoration: underline; }
 .loading-text { color:var(--text3); font-size:.8rem; padding:.5rem; }
 .err-text { color:var(--danger); font-size:.8rem; padding:.5rem; }
+.collab-search-bar {
+  margin-bottom: .5rem;
+}
+.collab-search-bar input {
+  width: 100%; padding: .35rem .6rem; border: 1px solid var(--border);
+  border-radius: 6px; font-size: .8rem; font-family: inherit;
+}
+.collab-search-bar input:focus { outline: none; border-color: var(--primary); }
 /* User search dropdown */
 .user-search-wrap { position: relative; display: inline-block; }
 .user-search-wrap input { width: 160px; }
@@ -276,10 +294,36 @@ body {
   box-shadow: 0 4px 16px rgba(0,0,0,.1); }
 @media (max-width: 768px) {
   .main-area { flex-direction: column; }
-  .sidebar { width: 100%; min-width: 0; border-right: none; border-bottom: 1px solid var(--border); max-height: 45vh; }
+  .sidebar { width: 100% !important; min-width: 0 !important; border-right: none !important; border-bottom: 1px solid var(--border); max-height: none; flex: none; }
+  .content { flex: 1; min-height: 0; }
   .modal { min-width: auto; width: calc(100vw - 2rem); }
-  .batch-bar { flex-direction: column; align-items: stretch; }
+  .batch-bar { flex-direction: column; align-items: stretch; gap: .4rem; }
   .batch-bar input { width: 100%; }
+  .batch-bar .user-search-wrap { width: 100%; }
+  .batch-bar .user-search-wrap input { width: 100%; }
+  .batch-bar .batch-btns { display: flex; gap: .4rem; }
+  /* Topbar compact */
+  .topbar { padding: .4rem .5rem; gap: .4rem; flex-wrap: wrap; }
+  .topbar-title { font-size: .9rem; }
+  .topbar input[type="password"] { width: 100% !important; }
+  /* Mobile tabs for switching panels */
+  .mobile-tabs { display: flex; background: var(--card); border-bottom: 1px solid var(--border); }
+  .mobile-tabs button {
+    flex: 1; padding: .5rem; border: none; background: none; font-size: .8rem;
+    cursor: pointer; color: var(--text3); border-bottom: 2px solid transparent; font-family: inherit;
+  }
+  .mobile-tabs button.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+  /* Hide panels by default on mobile, show via JS */
+  .main-area > .sidebar,
+  .main-area > .content {
+    display: none !important; flex: 1; overflow: hidden; min-height: 0;
+  }
+  .main-area > .mobile-visible { display: flex !important; flex-direction: column; }
+  /* User dropdown on mobile: always drop down */
+  .user-dropdown { bottom: auto !important; top: 100% !important; margin-top: 2px !important; margin-bottom: 0 !important;
+    box-shadow: 0 4px 16px rgba(0,0,0,.1) !important; left: 0; right: 0; width: auto; }
+  /* Collab items stack better */
+  .collab-item { flex-wrap: wrap; gap: .4rem; }
 }
 </style>
 

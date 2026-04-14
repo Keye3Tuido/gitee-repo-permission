@@ -7,6 +7,7 @@ let allRepos = [];
 let selectedRepos = new Set();
 let currentRepo = null;
 let collapsedGroups = new Set();
+let currentCollabs = []; // cached collaborators for current repo
 
 function getConfig() {
   try {
@@ -103,9 +104,13 @@ async function loadAllRepos() {
   try {
     const user = await giteeApi('GET', '/user');
     setStatus('\u6b63\u5728\u52a0\u8f7d ' + user.login + ' \u7684\u4ed3\u5e93\u2026', user.login);
-    const ownRepos = await giteeApiFetchAll('/user/repos?type=all&sort=full_name');
 
     const includeOrg = document.getElementById('org-toggle').checked;
+    // type=personal: only user's own repos; type=all: includes org repos
+    const repoType = includeOrg ? 'all' : 'personal';
+    const ownRepos = await giteeApiFetchAll('/user/repos?type=' + repoType + '&sort=full_name');
+
+    // If including orgs, also fetch repos from each org (catches repos not returned by /user/repos)
     let orgRepos = [];
     if (includeOrg) {
       const orgs = await giteeApiFetchAll('/user/orgs');
@@ -242,6 +247,7 @@ function renderRepoList() {
             currentRepo = repo.full_name;
             renderRepoList();
             loadRepoDetail(repo.full_name);
+            if (window.innerWidth <= 768) switchMobileTab('detail');
           };
           container.appendChild(div);
         })(repos[ri]);
@@ -314,52 +320,88 @@ async function loadRepoDetail(fullName) {
 
   const collabList = document.getElementById('collab-list');
   collabList.innerHTML = '<div class="loading-text">\u52a0\u8f7d\u4e2d\u2026</div>';
+  // Reset search
+  var collabSearchEl = document.getElementById('collab-search');
+  if (collabSearchEl) collabSearchEl.value = '';
 
   try {
     const collabs = await giteeApiFetchAll('/repos/' + fullName + '/collaborators');
-    collabList.innerHTML = '';
-
-    if (collabs.length === 0) {
-      collabList.innerHTML = '<div class="loading-text">\u6682\u65e0\u534f\u4f5c\u8005</div>';
-      return;
-    }
-
-    for (var ci = 0; ci < collabs.length; ci++) {
-      (function(c) {
-        const div = document.createElement('div');
-        div.className = 'collab-item';
-
-        const avatar = document.createElement('img');
-        avatar.className = 'avatar';
-        avatar.src = c.avatar_url || '';
-        avatar.onerror = function() { avatar.style.display = 'none'; };
-
-        const info = document.createElement('div');
-        info.className = 'collab-info';
-        info.innerHTML = '<div class="collab-name">' + (c.name || c.login) + '</div><div class="collab-login">@' + c.login + '</div>';
-
-        const permSelect = document.createElement('select');
-        permSelect.innerHTML = '<option value="pull">\u53ea\u8bfb</option><option value="push">\u8bfb\u5199</option><option value="admin">\u7ba1\u7406\u5458</option>';
-        const cp = c.permissions || c.permission || {};
-        if (cp.admin) permSelect.value = 'admin';
-        else if (cp.push) permSelect.value = 'push';
-        else permSelect.value = 'pull';
-        permSelect.onchange = function() { updateCollabPermission(fullName, c.login, permSelect.value); };
-
-        const removeBtn = document.createElement('button');
-        removeBtn.className = 'btn btn-danger btn-sm';
-        removeBtn.textContent = '\u79fb\u9664';
-        removeBtn.onclick = function() { removeCollab(fullName, c.login); };
-
-        div.appendChild(avatar);
-        div.appendChild(info);
-        div.appendChild(permSelect);
-        div.appendChild(removeBtn);
-        collabList.appendChild(div);
-      })(collabs[ci]);
-    }
+    currentCollabs = collabs;
+    renderCollabList('');
   } catch (e) {
+    currentCollabs = [];
     collabList.innerHTML = '<div class="err-text">\u52a0\u8f7d\u5931\u8d25: ' + e.message + '</div>';
+  }
+}
+
+function renderCollabList(filter) {
+  var fullName = currentRepo;
+  var collabList = document.getElementById('collab-list');
+  collabList.innerHTML = '';
+  filter = (filter || '').trim().toLowerCase();
+
+  var filtered = currentCollabs;
+  if (filter) {
+    filtered = currentCollabs.filter(function(c) {
+      var login = (c.login || '').toLowerCase();
+      var name = (c.name || '').toLowerCase();
+      return login.indexOf(filter) !== -1 || name.indexOf(filter) !== -1;
+    });
+  }
+
+  // Update count
+  var countEl = document.getElementById('collab-count');
+  if (countEl) {
+    if (filter && filtered.length !== currentCollabs.length) {
+      countEl.textContent = '(' + filtered.length + '/' + currentCollabs.length + ')';
+    } else {
+      countEl.textContent = currentCollabs.length > 0 ? '(' + currentCollabs.length + ')' : '';
+    }
+  }
+
+  if (currentCollabs.length === 0) {
+    collabList.innerHTML = '<div class="loading-text">\u6682\u65e0\u534f\u4f5c\u8005</div>';
+    return;
+  }
+
+  if (filtered.length === 0) {
+    collabList.innerHTML = '<div class="loading-text">\u672a\u627e\u5230\u5339\u914d\u7684\u534f\u4f5c\u8005</div>';
+    return;
+  }
+
+  for (var ci = 0; ci < filtered.length; ci++) {
+    (function(c) {
+      const div = document.createElement('div');
+      div.className = 'collab-item';
+
+      const avatar = document.createElement('img');
+      avatar.className = 'avatar';
+      avatar.src = c.avatar_url || '';
+      avatar.onerror = function() { avatar.style.display = 'none'; };
+
+      const info = document.createElement('div');
+      info.className = 'collab-info';
+      info.innerHTML = '<div class="collab-name">' + (c.name || c.login) + '</div><div class="collab-login">@' + c.login + '</div>';
+
+      const permSelect = document.createElement('select');
+      permSelect.innerHTML = '<option value="pull">\u53ea\u8bfb</option><option value="push">\u8bfb\u5199</option><option value="admin">\u7ba1\u7406\u5458</option>';
+      const cp = c.permissions || c.permission || {};
+      if (cp.admin) permSelect.value = 'admin';
+      else if (cp.push) permSelect.value = 'push';
+      else permSelect.value = 'pull';
+      permSelect.onchange = function() { updateCollabPermission(fullName, c.login, permSelect.value); };
+
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'btn btn-danger btn-sm';
+      removeBtn.textContent = '\u79fb\u9664';
+      removeBtn.onclick = function() { removeCollab(fullName, c.login); };
+
+      div.appendChild(avatar);
+      div.appendChild(info);
+      div.appendChild(permSelect);
+      div.appendChild(removeBtn);
+      collabList.appendChild(div);
+    })(filtered[ci]);
   }
 }
 
@@ -513,6 +555,18 @@ function switchTab(tab) {
   const btns = document.querySelectorAll('#tab-bar button');
   btns[0].classList.toggle('active', tab === 'detail');
   btns[1].classList.toggle('active', tab === 'log');
+  // On mobile, also switch the mobile tab
+  if (window.innerWidth <= 768) {
+    var mobileTab = tab === 'log' ? 'log' : 'detail';
+    var sidebar = document.getElementById('repos-panel');
+    var content = document.querySelector('.content');
+    if (sidebar) sidebar.classList.remove('mobile-visible');
+    if (content) content.classList.add('mobile-visible');
+    var mbtns = document.querySelectorAll('#mobile-tabs button');
+    for (var i = 0; i < mbtns.length; i++) mbtns[i].classList.remove('active');
+    var idx = { detail: 1, log: 2 };
+    if (mbtns[idx[mobileTab]]) mbtns[idx[mobileTab]].classList.add('active');
+  }
 }
 
 // ============================================================
@@ -565,6 +619,16 @@ function showModal(title, inputs, selects, onConfirm) {
 document.getElementById('token-input').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') loadAllRepos();
 });
+
+// Collab search filter
+(function() {
+  var el = document.getElementById('collab-search');
+  if (el) {
+    el.addEventListener('input', function() {
+      renderCollabList(el.value);
+    });
+  }
+})();
 
 // ============================================================
 // User search (autocomplete via Gitee search API)
@@ -650,4 +714,41 @@ function closeUserDropdown(dropdownEl) {
   var batchInput = document.getElementById('batch-user');
   var batchDropdown = document.getElementById('batch-user-dropdown');
   if (batchInput && batchDropdown) setupUserSearch(batchInput, batchDropdown);
+})();
+
+// ============================================================
+// Mobile tab switching
+// ============================================================
+function switchMobileTab(tab) {
+  var sidebar = document.getElementById('repos-panel');
+  var content = document.querySelector('.content');
+
+  // Remove mobile-visible from all
+  if (sidebar) sidebar.classList.remove('mobile-visible');
+  if (content) content.classList.remove('mobile-visible');
+
+  if (tab === 'repos') {
+    if (sidebar) sidebar.classList.add('mobile-visible');
+  } else if (tab === 'detail') {
+    if (content) content.classList.add('mobile-visible');
+    switchTab('detail');
+  } else if (tab === 'log') {
+    if (content) content.classList.add('mobile-visible');
+    switchTab('log');
+  }
+
+  // Update tab buttons
+  var btns = document.querySelectorAll('#mobile-tabs button');
+  for (var i = 0; i < btns.length; i++) {
+    btns[i].classList.remove('active');
+  }
+  var idx = { repos: 0, detail: 1, log: 2 };
+  if (btns[idx[tab]]) btns[idx[tab]].classList.add('active');
+}
+
+// Initialize mobile: show repos tab by default
+(function() {
+  if (window.innerWidth <= 768) {
+    switchMobileTab('repos');
+  }
 })();
