@@ -78,6 +78,9 @@ body {
 .group-header .badge.admin { background: var(--primary); }
 .group-header .badge.push { background: var(--success); }
 .group-header .badge.pull { background: var(--text3); }
+.group-header .badge.error { background: var(--danger); }
+.perm-badge.perm-error { background: var(--danger); color: #fff; }
+.group-header .badge.loading { background: var(--warning); }
 .group-header .toggle { font-size: .7rem; color: var(--text3); }
 .group-header .count { font-size: .75rem; color: var(--text3); font-weight: 400; }
 .repo-item {
@@ -127,6 +130,15 @@ body {
           <button class="btn btn-ghost btn-sm" onclick="deselectAll()" title="&#21462;&#28040;&#20840;&#36873;">&#9744;</button>
         </div>
       </div>
+      <div id="load-progress-wrap" style="display:none;padding:.3rem .75rem;border-bottom:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;margin-bottom:.25rem">
+          <span id="load-progress-label" style="font-size:.72rem;color:var(--text3)"></span>
+          <span id="load-progress-perm" style="font-size:.72rem;color:var(--text3)"></span>
+        </div>
+        <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;position:relative">
+          <div id="load-progress-fill" style="height:100%;background:var(--primary);width:0%;transition:width .3s ease;border-radius:2px"></div>
+        </div>
+      </div>
       <div class="sidebar-search">
         <input type="text" id="repo-search" placeholder="&#128269; &#25628;&#32034;&#20179;&#24211;..." autocomplete="off">
       </div>
@@ -168,6 +180,20 @@ body {
             </div>
             <div class="collab-search-bar">
               <input type="text" id="collab-search" placeholder="&#128269; &#25628;&#32034;&#21327;&#20316;&#32773;..." autocomplete="off">
+            </div>
+            <div id="collab-batch-bar" style="display:none">
+              <label style="display:flex;align-items:center;gap:.3rem;margin:0;cursor:pointer">
+                <input type="checkbox" id="collab-select-all" onchange="toggleSelectAllCollabs()" style="margin:0">
+                <span style="font-size:.8rem">&#20840;&#36873;</span>
+              </label>
+              <span id="collab-selected-count" style="font-size:.8rem;color:var(--text3);flex:1">&#24050;&#36873; 0 &#20154;</span>
+              <select id="collab-batch-perm">
+                <option value="pull">&#21482;&#35835;</option>
+                <option value="push" selected>&#35835;&#20889;</option>
+                <option value="admin">&#31649;&#29702;&#21592;</option>
+              </select>
+              <button class="btn btn-primary btn-sm" id="collab-batch-update-btn" onclick="batchCollabUpdatePerm()" disabled>&#20462;&#25913;&#26435;&#38480;</button>
+              <button class="btn btn-danger btn-sm" id="collab-batch-remove-btn" onclick="batchCollabRemove()" disabled>&#31227;&#38500;&#25152;&#36873;</button>
             </div>
             <div id="collab-list"></div>
           </div>
@@ -257,6 +283,7 @@ body {
 }
 .tab-bar button.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
 .perm-badge { font-size:.75rem; padding:.2rem .5rem; border-radius:10px; color:#fff; }
+.perm-badge.perm-loading { background: var(--warning); }
 .repo-link { font-size:.75rem; color:var(--primary); text-decoration:none; }
 .repo-link:hover { text-decoration: underline; }
 .loading-text { color:var(--text3); font-size:.8rem; padding:.5rem; }
@@ -269,6 +296,16 @@ body {
   border-radius: 6px; font-size: .8rem; font-family: inherit;
 }
 .collab-search-bar input:focus { outline: none; border-color: var(--primary); }
+#collab-batch-bar {
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  padding: .35rem .6rem; background: var(--hover-bg);
+  border: 1px solid var(--border); border-radius: 6px; margin-bottom: .5rem;
+}
+#collab-batch-bar select {
+  padding: .25rem .4rem; border: 1px solid var(--border); border-radius: 6px;
+  font-size: .8rem; font-family: inherit; background: var(--card);
+}
+.collab-item-cb { flex-shrink: 0; cursor: pointer; }
 /* User search dropdown */
 .user-search-wrap { position: relative; display: inline-block; }
 .user-search-wrap input { width: 160px; }
@@ -296,6 +333,16 @@ body {
 .modal .user-search-wrap input { width: 100%; }
 .modal .user-dropdown { bottom: auto; top: 100%; margin-top: 2px; margin-bottom: 0;
   box-shadow: 0 4px 16px rgba(0,0,0,.1); }
+@keyframes progress-shimmer {
+  0%   { background-position: 200% center; }
+  100% { background-position: -200% center; }
+}
+.progress-indeterminate #load-progress-fill {
+  width: 100% !important; transition: none !important;
+  background: linear-gradient(90deg, var(--border) 0%, var(--primary) 50%, var(--border) 100%);
+  background-size: 200% 100%;
+  animation: progress-shimmer 1.4s ease-in-out infinite;
+}
 @media (max-width: 768px) {
   .main-area { flex-direction: column; }
   .sidebar { width: 100% !important; min-width: 0 !important; border-right: none !important; border-bottom: 1px solid var(--border); max-height: none; flex: none; }
