@@ -2,58 +2,23 @@
 // Gitee Repo Permission Manager - app.js
 // ============================================================
 
-const STORAGE_KEY = 'gitee_perm_config';
 let allRepos = [];
 let selectedRepos = new Set();
 let currentRepo = null;
 let collapsedGroups = new Set();
-let currentCollabs = []; // cached collaborators for current repo
-let currentCollabsRepo = null; // which repo currentCollabs belongs to
-let selectedCollabs = new Set(); // collaborators selected in detail panel
-let currentUser = '';   // logged-in username
-let _loadGeneration = 0; // incremented on each loadAllRepos(); Phase 2 checks this to self-cancel
-
-function getConfig() {
-  try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
-    const remember = !!stored.rememberToken;
-    let token = '';
-    if (remember) {
-      token = localStorage.getItem('gitee_perm_token') || '';
-    } else {
-      token = sessionStorage.getItem('gitee_perm_token') || '';
-      if (localStorage.getItem('gitee_perm_token')) localStorage.removeItem('gitee_perm_token');
-    }
-    stored.token = token;
-    stored.rememberToken = remember;
-    return stored;
-  } catch { return {}; }
-}
-function setConfig(c) {
-  c = c || {};
-  const remember = !!c.rememberToken;
-  const token = c.token || '';
-  if (remember) {
-    localStorage.setItem('gitee_perm_token', token);
-    sessionStorage.removeItem('gitee_perm_token');
-  } else {
-    sessionStorage.setItem('gitee_perm_token', token);
-    if (localStorage.getItem('gitee_perm_token')) localStorage.removeItem('gitee_perm_token');
-  }
-  const toStore = { ...c }; delete toStore.token;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
-}
+let currentCollabs = [];
+let currentCollabsRepo = null;
+let selectedCollabs = new Set();
+let currentUser = '';
+let currentSubmodules = [];
+let currentSubmodulesRepo = null;
+let _loadGeneration = 0;
+let _userSearchCache = {};
 
 (function init() {
-  const c = getConfig();
-  document.getElementById('token-input').value = c.token || '';
-  document.getElementById('batch-user').value = c.lastUser || '';
-  var remEl = document.getElementById('remember-toggle');
-  if (remEl) remEl.checked = !!c.rememberToken;
-  // If rememberToken is false, ensure local token cleared for safety
-  if (!c.rememberToken) {
-    if (localStorage.getItem('gitee_perm_token')) localStorage.removeItem('gitee_perm_token');
-  }
+  var saved = localStorage.getItem('gitee_perm_token') || '';
+  if (saved) document.getElementById('token-input').value = saved;
+  document.getElementById('batch-user').value = '';
 })();
 
 function toggleTokenVisibility() {
@@ -61,22 +26,29 @@ function toggleTokenVisibility() {
   el.type = el.type === 'password' ? 'text' : 'password';
 }
 
-function onRememberToggleChanged(checked) {
+function rememberToken() {
   var token = document.getElementById('token-input').value.trim();
-  // Immediately clear local token if turning off
-  if (!checked) {
-    if (localStorage.getItem('gitee_perm_token')) localStorage.removeItem('gitee_perm_token');
-  }
-  // Update stored config and token according to choice
-  var cfg = getConfig() || {};
-  cfg.rememberToken = !!checked;
-  cfg.token = token;
-  setConfig(cfg);
+  if (!token) { setStatus('请先输入 Token'); return; }
+  localStorage.setItem('gitee_perm_token', token);
+  setStatus('Token 已保存到本地缓存');
 }
 
-function setStatus(msg, right) {
+function clearTokenCache() {
+  localStorage.removeItem('gitee_perm_token');
+  sessionStorage.removeItem('gitee_perm_token');
+  document.getElementById('token-input').value = '';
+  setStatus('Token 缓存已清除');
+}
+
+function setStatus(msg) {
   document.getElementById('status-left').textContent = msg;
-  if (right !== undefined) document.getElementById('status-right').textContent = right;
+}
+
+function hoverShow(name, url) {
+  document.getElementById('status-right').textContent = name + (url ? ' (' + url + ')' : '');
+}
+function hoverClear() {
+  document.getElementById('status-right').textContent = '';
 }
 
 function appendLog(msg, type) {
@@ -139,8 +111,6 @@ function setBatchLoading(loading) {
 async function loadAllRepos() {
   const token = getToken();
   if (!token) { setStatus('\u8bf7\u8f93\u5165 Token'); return; }
-  var remember = document.getElementById('remember-toggle') && document.getElementById('remember-toggle').checked;
-  setConfig({ token, lastUser: document.getElementById('batch-user').value.trim(), rememberToken: remember });
   const btn = document.getElementById('load-btn');
   btn.disabled = true; btn.textContent = '\u52a0\u8f7d\u4e2d\u2026';
   setBatchLoading(true);
@@ -274,6 +244,7 @@ async function loadAllRepos() {
     btn.disabled = false; btn.textContent = '\u52a0\u8f7d\u4ed3\u5e93';
     setBatchLoading(false);
     if (progressWrap) progressWrap.style.display = 'none';
+    renderRepoList(); // clear old list display
     return;
   }
   currentUser = user.login;
@@ -289,18 +260,15 @@ async function loadAllRepos() {
     userDisplay.style.display = 'flex';
   }
 
-  const includeOrg = document.getElementById('org-toggle').checked;
-  const repoType = includeOrg ? 'all' : 'personal';
-
   // ── Phase A: user repos + org repos all concurrent ──────────
   var fetchTasks = [];
 
-  // User repos — page by page
+  // User repos (always type=all so personal repos are always fetched)
   fetchTasks.push((async function fetchUserRepos() {
     var page = 1;
     while (page <= 100) {
       if (_loadGeneration !== myGeneration) return;
-      var data = await giteeApi('GET', '/user/repos?type=' + repoType + '&sort=full_name&per_page=100&page=' + page);
+      var data = await giteeApi('GET', '/user/repos?type=all&sort=full_name&per_page=100&page=' + page);
       if (!Array.isArray(data) || data.length === 0) break;
       var added = 0;
       for (var i = 0; i < data.length; i++) if (addRepo(data[i])) added++;
@@ -311,8 +279,7 @@ async function loadAllRepos() {
   })());
 
   // Org repos — fetch org list then all orgs concurrently
-  if (includeOrg) {
-    fetchTasks.push((async function fetchOrgRepos() {
+  fetchTasks.push((async function fetchOrgRepos() {
       var orgs;
       try { orgs = await giteeApiFetchAll('/user/orgs'); }
       catch (e) { appendLog('\u52a0\u8f7d\u7ec4\u7ec7\u5217\u8868\u5931\u8d25: ' + e.message, 'err'); return; }
@@ -336,7 +303,6 @@ async function loadAllRepos() {
         })();
       }));
     })());
-  }
 
   try {
     await Promise.all(fetchTasks);
@@ -359,13 +325,13 @@ async function loadAllRepos() {
   // ── Phase B: wait for permission pool to drain ──────────────
   if (permTotal === 0) {
     setBatchLoading(false);
-    setStatus('\u5df2\u52a0\u8f7d ' + allRepos.length + ' \u4e2a\u4ed3\u5e93', user.login);
+    setStatus('\u5df2\u52a0\u8f7d ' + allRepos.length + ' \u4e2a\u4ed3\u5e93');
     if (progressWrap) progressWrap.style.display = 'none';
     return;
   }
 
   if (permDone < permTotal) {
-    setStatus('\u6b63\u5728\u83b7\u53d6\u6743\u9650 ' + permDone + '/' + permTotal + '\u2026', user.login);
+    setStatus('\u6b63\u5728\u83b7\u53d6\u6743\u9650 ' + permDone + '/' + permTotal + '\u2026');
     await new Promise(function(resolve) {
       permAllResolve = resolve;
       checkPermAllDone(); // catch the case where pool already finished
@@ -374,7 +340,7 @@ async function loadAllRepos() {
 
   if (_loadGeneration !== myGeneration) return;
   setBatchLoading(false);
-  setStatus('\u5df2\u52a0\u8f7d ' + allRepos.length + ' \u4e2a\u4ed3\u5e93', user.login);
+  setStatus('\u5df2\u52a0\u8f7d ' + allRepos.length + ' \u4e2a\u4ed3\u5e93');
   appendLog('\u6743\u9650\u52a0\u8f7d\u5b8c\u6210', 'ok');
   sortAndRender();
   if (progressWrap) progressWrap.style.display = 'none';
@@ -461,6 +427,7 @@ function renderRepoList() {
           const nameSpan = document.createElement('span');
           nameSpan.className = 'repo-name';
           nameSpan.textContent = repo.full_name;
+          nameSpan.title = repo.full_name;
 
           const lockIcon = document.createElement('span');
           lockIcon.className = 'lock-icon';
@@ -469,6 +436,9 @@ function renderRepoList() {
           div.appendChild(cb);
           div.appendChild(nameSpan);
           div.appendChild(lockIcon);
+          div.title = repo.full_name;
+          div.onmouseenter = function() { hoverShow(repo.full_name, repo.html_url); };
+          div.onmouseleave = function() { hoverClear(); };
           div.onclick = function(e) {
             if (e.target === cb) return;
             currentRepo = repo.full_name;
@@ -610,11 +580,15 @@ async function loadRepoDetail(fullName) {
     if (fullName !== currentRepo) return;
     currentCollabs = collabs; currentCollabsRepo = fullName;
     renderCollabList('');
+    // Load submodules for this repo
+    loadSubmodules(fullName);
   } catch (e) {
     if (fullName !== currentRepo) return;
     currentCollabs = []; currentCollabsRepo = null;
     collabList.innerHTML = '';
     var _errDiv = document.createElement('div'); _errDiv.className = 'err-text'; _errDiv.textContent = '\u52a0\u8f7d\u5931\u8d25: ' + e.message; collabList.appendChild(_errDiv);
+    // still try to load submodules even if collaborators failed
+    loadSubmodules(fullName);
   }
 }
 
@@ -741,6 +715,190 @@ function renderCollabList(filter) {
   updateCollabBatchBar(filtered, isAdmin);
 }
 
+// ============================================================
+// Submodules
+// ============================================================
+async function getSubmoduleRepos(fullName) {
+  try {
+    const data = await giteeApi('GET', '/repos/' + fullName + '/contents/.gitmodules');
+    if (!data || !data.content) return [];
+    const b64 = (data.content || '').replace(/\s+/g, '');
+    const txt = atob(b64);
+    const lines = txt.split(/\r?\n/);
+    const repos = [];
+    // Match any URL referencing gitee.com/gitee.cn:
+    //   https://gitee.com/owner/repo[.git]
+    //   git@gitee.com:owner/repo[.git]
+    //   ssh://git@gitee.com/owner/repo[.git]
+    //   git://gitee.com/owner/repo[.git]
+    // Also handle gitee.cn domain
+    const GITEE_RE = /(?:https?:\/\/|git@|ssh:\/\/git@|git:\/\/)?(?:gitee\.com|gitee\.cn)[:\/]([^\/]+)\/([^\/\s#?]+?)(?:\.git)?(?:\/.*)?$/;
+    for (let line of lines) {
+      const m = line.match(/url\s*=\s*(.+)/);
+      if (!m) continue;
+      let url = m[1].trim();
+      const m2 = url.match(GITEE_RE);
+      if (m2 && m2[1] && m2[2]) {
+        repos.push(m2[1] + '/' + m2[2].replace(/\.git$/, ''));
+      }
+    }
+    return Array.from(new Set(repos));
+  } catch (e) {
+    return [];
+  }
+}
+
+async function loadSubmodules(fullName) {
+  const wrap = document.getElementById('submodule-list');
+  const countEl = document.getElementById('submodule-count');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  if (countEl) countEl.textContent = '(加载中…)';
+  currentSubmodules = []; currentSubmodulesRepo = null;
+  try {
+    const subs = await getSubmoduleRepos(fullName);
+    if (fullName !== currentRepo) return;
+    if (!subs || subs.length === 0) {
+      wrap.innerHTML = '<div class="loading-text">暂无子模块</div>';
+      if (countEl) countEl.textContent = '';
+      return;
+    }
+    // initialize submodule objects and render loading state
+    currentSubmodules = subs.map(function(s) {
+      return { full_name: s, name: s.split('/').slice(-1)[0], permission: {}, permissionLoaded: false, permissionError: false, html_url: 'https://gitee.com/' + s };
+    });
+    currentSubmodulesRepo = fullName;
+    renderSubmoduleList();
+
+    // fetch permission for each submodule
+    // fetch permission for each submodule in parallel
+    try {
+      const promises = currentSubmodules.map(function(sub) {
+        return giteeApi('GET', '/repos/' + sub.full_name).then(function(d) {
+          return { ok: true, data: d };
+        }).catch(function(err) {
+          return { ok: false, err: err };
+        });
+      });
+      const results = await Promise.all(promises);
+      if (fullName !== currentRepo) return;
+      for (let i = 0; i < results.length; i++) {
+        const res = results[i];
+        const sub = currentSubmodules[i];
+        if (res && res.ok && res.data) {
+          sub.permission = res.data.permission || {};
+          sub.permissionLoaded = true;
+          sub.permissionError = false;
+        } else {
+          sub.permission = {};
+          sub.permissionLoaded = true;
+          sub.permissionError = true;
+        }
+      }
+      renderSubmoduleList();
+    } catch (e) {
+      // if something unexpected happened, mark all as errored
+      for (let i = 0; i < currentSubmodules.length; i++) {
+        const sub = currentSubmodules[i];
+        sub.permission = {};
+        sub.permissionLoaded = true;
+        sub.permissionError = true;
+      }
+      renderSubmoduleList();
+    }
+  } catch (e) {
+    wrap.innerHTML = '<div class="err-text">加载子模块失败</div>';
+    if (countEl) countEl.textContent = '';
+  }
+}
+
+function renderSubmoduleList() {
+  const wrap = document.getElementById('submodule-list');
+  const countEl = document.getElementById('submodule-count');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  if (!currentSubmodules || currentSubmodules.length === 0) {
+    wrap.innerHTML = '<div class="loading-text">暂无子模块</div>';
+    if (countEl) countEl.textContent = '';
+    return;
+  }
+  if (countEl) countEl.textContent = '(' + currentSubmodules.length + ')';
+
+  // header handled in HTML; render list
+  for (let i = 0; i < currentSubmodules.length; i++) {
+    const s = currentSubmodules[i];
+    const div = document.createElement('div');
+    div.className = 'repo-item';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = selectedRepos.has(s.full_name);
+    const hasPerm = s.permissionLoaded && !s.permissionError && (s.permission && (s.permission.admin || s.permission.push || s.permission.pull));
+    if (!hasPerm) cb.disabled = true;
+    cb.onclick = function(e) {
+      e.stopPropagation();
+      if (cb.checked) selectedRepos.add(s.full_name);
+      else selectedRepos.delete(s.full_name);
+      renderRepoList();
+    };
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'repo-name';
+    nameSpan.textContent = s.full_name;
+    nameSpan.title = s.full_name;
+
+    const lockIcon = document.createElement('span');
+    lockIcon.className = 'lock-icon';
+    lockIcon.textContent = '';
+    div.appendChild(cb);
+    div.appendChild(nameSpan);
+    div.title = s.full_name;
+    div.onmouseenter = function() { hoverShow(s.full_name, s.html_url); };
+    div.onmouseleave = function() { hoverClear(); };
+
+    // permission badges: admin/push/pull/none
+    const badgeWrap = document.createElement('div');
+    badgeWrap.style.display = 'flex'; badgeWrap.style.gap = '.5rem'; badgeWrap.style.marginLeft = '8px';
+    if (!s.permissionLoaded) {
+      const p = document.createElement('span'); p.className = 'perm-badge perm-loading'; p.textContent = '权限: 加载中'; badgeWrap.appendChild(p);
+    } else if (s.permissionError) {
+      const p = document.createElement('span'); p.className = 'perm-badge perm-error'; p.textContent = '无权限'; badgeWrap.appendChild(p);
+    } else {
+      const p = s.permission || {};
+      const items = [ { label: 'admin', val: !!p.admin, color: 'var(--primary)' }, { label: 'push', val: !!p.push, color: 'var(--success)' }, { label: 'pull', val: !!p.pull, color: 'var(--text3)' } ];
+      for (let it of items) {
+        const span = document.createElement('span'); span.className = 'perm-badge'; span.style.background = it.val ? it.color : '#ddd'; span.textContent = it.label + ': ' + (it.val ? '\u2713' : '\u2717'); badgeWrap.appendChild(span);
+      }
+    }
+
+    div.appendChild(badgeWrap);
+    wrap.appendChild(div);
+  }
+
+  // update select-all checkbox state
+  const selAllEl = document.getElementById('submodule-select-all');
+  if (selAllEl) {
+    const selectable = currentSubmodules.filter(function(x) { return x.permissionLoaded && !x.permissionError && (x.permission && (x.permission.admin || x.permission.push || x.permission.pull)); });
+    const selCount = selectable.filter(function(x) { return selectedRepos.has(x.full_name); }).length;
+    selAllEl.checked = selectable.length > 0 && selCount === selectable.length;
+    selAllEl.indeterminate = selCount > 0 && selCount < selectable.length;
+  }
+}
+
+function toggleSelectAllSubmodules() {
+  if (!currentSubmodules || currentSubmodules.length === 0) return;
+  const selAllEl = document.getElementById('submodule-select-all');
+  const selectable = currentSubmodules.filter(function(x) { return x.permissionLoaded && !x.permissionError && (x.permission && (x.permission.admin || x.permission.push || x.permission.pull)); });
+  if (!selAllEl.checked) {
+    // unselect all
+    selectable.forEach(function(s) { selectedRepos.delete(s.full_name); });
+  } else {
+    selectable.forEach(function(s) { selectedRepos.add(s.full_name); });
+  }
+  renderSubmoduleList();
+  renderRepoList();
+}
+
 function updateCollabBatchBar(filtered, isAdmin) {
   var bar = document.getElementById('collab-batch-bar');
   if (!bar) return;
@@ -800,7 +958,7 @@ async function batchCollabUpdatePerm() {
   var ok = 0, fail = 0;
   try {
     for (var i = 0; i < logins.length; i++) {
-      setStatus('\u6279\u91cf\u4fee\u6539\u6743\u9650\u4e2d\u2026 ' + (i + 1) + '/' + logins.length, logins[i]);
+      setStatus('\u6279\u91cf\u4fee\u6539\u6743\u9650\u4e2d\u2026 ' + (i + 1) + '/' + logins.length);
       try {
         await giteeApi('PUT', '/repos/' + currentRepo + '/collaborators/' + logins[i], { permission: permission });
         appendLog('\u2713 ' + logins[i], 'ok');
@@ -848,7 +1006,7 @@ async function batchCollabRemove() {
   var ok = 0, fail = 0;
   try {
     for (var i = 0; i < logins.length; i++) {
-      setStatus('\u6279\u91cf\u79fb\u9664\u4e2d\u2026 ' + (i + 1) + '/' + logins.length, logins[i]);
+      setStatus('\u6279\u91cf\u79fb\u9664\u4e2d\u2026 ' + (i + 1) + '/' + logins.length);
       try {
         await giteeApi('DELETE', '/repos/' + currentRepo + '/collaborators/' + logins[i]);
         appendLog('\u2713 ' + logins[i], 'ok');
@@ -926,10 +1084,13 @@ async function updateCollabPermission(repoFullName, username, permission) {
     await giteeApi('PUT', '/repos/' + repoFullName + '/collaborators/' + username, { permission: permission });
     setStatus('\u5df2\u66f4\u65b0: ' + username + ' -> ' + permission);
     appendLog(repoFullName + ': ' + username + ' -> ' + permission, 'ok');
+    // show operation log and refresh detail in background
+    switchTab('log');
     loadRepoDetail(repoFullName);
   } catch (e) {
     setStatus('\u66f4\u65b0\u5931\u8d25: ' + e.message);
     appendLog(repoFullName + ': \u66f4\u65b0 ' + username + ' \u5931\u8d25 - ' + e.message, 'err');
+    switchTab('log');
     loadRepoDetail(repoFullName);
   }
 }
@@ -945,6 +1106,7 @@ async function removeCollab(repoFullName, username) {
     await giteeApi('DELETE', '/repos/' + repoFullName + '/collaborators/' + username);
     setStatus('\u5df2\u79fb\u9664: ' + username);
     appendLog(repoFullName + ': \u5df2\u79fb\u9664 ' + username, 'ok');
+    switchTab('log');
     loadRepoDetail(repoFullName);
   } catch (e) {
     setStatus('\u79fb\u9664\u5931\u8d25: ' + e.message);
@@ -991,6 +1153,8 @@ function promptAddCollab() {
       await giteeApi('PUT', '/repos/' + currentRepo + '/collaborators/' + username, { permission: permission });
       appendLog(currentRepo + ': \u5df2\u6dfb\u52a0 ' + username + ' (' + permission + ')', 'ok');
       overlay.remove();
+      // show logs and refresh detail
+      switchTab('log');
       loadRepoDetail(currentRepo);
     } catch (e) {
       setStatus('\u64cd\u4f5c\u5931\u8d25: ' + e.message);
@@ -1013,8 +1177,6 @@ async function batchAddCollab() {
   const permission = document.getElementById('batch-perm').value;
   if (!username) { setStatus('\u8bf7\u8f93\u5165\u7528\u6237\u540d'); return; }
   if (selectedRepos.size === 0) { setStatus('\u8bf7\u5148\u9009\u62e9\u4ed3\u5e93'); return; }
-  var remember = document.getElementById('remember-toggle') && document.getElementById('remember-toggle').checked;
-  setConfig({ token: getToken(), lastUser: username, rememberToken: remember });
 
   const allSelected = Array.from(selectedRepos);
   // Only include repos with confirmed admin permission; skip loading repos and non-admin
@@ -1075,7 +1237,7 @@ async function batchAddCollab() {
   let ok = 0, fail = 0;
   try {
     for (let i = 0; i < repos.length; i++) {
-      setStatus('\u6279\u91cf\u6dfb\u52a0\u4e2d\u2026 ' + (i + 1) + '/' + repos.length, repos[i]);
+      setStatus('\u6279\u91cf\u6dfb\u52a0\u4e2d\u2026 ' + (i + 1) + '/' + repos.length);
       try {
         await giteeApi('PUT', '/repos/' + repos[i] + '/collaborators/' + username, { permission: permission });
         appendLog('\u2713 ' + repos[i], 'ok');
@@ -1147,7 +1309,7 @@ async function batchRemoveCollab() {
   let ok = 0, fail = 0;
   try {
     for (let i = 0; i < repos.length; i++) {
-      setStatus('\u6279\u91cf\u79fb\u9664\u4e2d\u2026 ' + (i + 1) + '/' + repos.length, repos[i]);
+      setStatus('\u6279\u91cf\u79fb\u9664\u4e2d\u2026 ' + (i + 1) + '/' + repos.length);
       try {
         await giteeApi('DELETE', '/repos/' + repos[i] + '/collaborators/' + username);
         appendLog('\u2713 ' + repos[i], 'ok');
@@ -1173,11 +1335,15 @@ async function batchRemoveCollab() {
 // Tabs
 // ============================================================
 function switchTab(tab) {
-  document.getElementById('tab-detail').style.display = tab === 'detail' ? '' : 'none';
-  document.getElementById('tab-log').style.display = tab === 'log' ? '' : 'none';
-  const btns = document.querySelectorAll('#tab-bar button');
-  btns[0].classList.toggle('active', tab === 'detail');
-  btns[1].classList.toggle('active', tab === 'log');
+  var detailEl = document.getElementById('tab-detail');
+  var logEl = document.getElementById('tab-log');
+  if (detailEl) detailEl.style.display = tab === 'detail' ? '' : 'none';
+  if (logEl) logEl.style.display = tab === 'log' ? '' : 'none';
+  var btns = document.querySelectorAll('#tab-bar button');
+  if (btns && btns.length >= 2) {
+    btns[0].classList.toggle('active', tab === 'detail');
+    btns[1].classList.toggle('active', tab === 'log');
+  }
   // On mobile, also switch the mobile tab
   if (window.innerWidth <= 768) {
     var mobileTab = tab === 'log' ? 'log' : 'detail';
@@ -1209,7 +1375,6 @@ document.getElementById('token-input').addEventListener('keydown', function(e) {
 // ============================================================
 // User search (autocomplete via Gitee search API)
 // ============================================================
-var _userSearchCache = {};
 
 function setupUserSearch(inputEl, dropdownEl) {
   var searchTimer = null;

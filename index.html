@@ -106,13 +106,9 @@ body {
     <span class="topbar-title">&#128273; Gitee &#20179;&#24211;&#26435;&#38480;&#31649;&#29702;&#22120;</span>
     <input type="password" id="token-input" placeholder="Gitee Personal Access Token" style="width:280px">
     <button class="btn btn-ghost btn-sm" onclick="toggleTokenVisibility()">&#128065;</button>
-    <label style="font-size:.8rem;display:flex;align-items:center;gap:.3rem;cursor:pointer">
-      <input type="checkbox" id="remember-toggle" onchange="onRememberToggleChanged(this.checked)"> 记住 Token
-    </label>
+    <button class="btn btn-ghost btn-sm" onclick="rememberToken()">&#128190; 记住 Token</button>
+    <button class="btn btn-ghost btn-sm" onclick="clearTokenCache()">&#128465; 清除 Token 缓存</button>
     <button class="btn btn-primary" onclick="loadAllRepos()" id="load-btn">&#21152;&#36733;&#20179;&#24211;</button>
-    <label style="font-size:.8rem;display:flex;align-items:center;gap:.3rem;cursor:pointer">
-      <input type="checkbox" id="org-toggle" checked> &#21253;&#21547;&#32452;&#32455;&#20179;&#24211;
-    </label>
     <span id="current-user-display" style="font-size:.8rem;color:var(--text3);margin-left:auto;display:none;align-items:center;gap:.4rem">
       <img id="current-user-avatar" style="width:20px;height:20px;border-radius:50%;vertical-align:middle" src="" alt="">
       <span id="current-user-name"></span>
@@ -170,35 +166,48 @@ body {
       <div id="tab-detail" class="content-body">
         <div class="placeholder-msg" id="detail-placeholder">
           <span style="font-size:2rem">&#128273;</span>
-          <span>&#36755;&#20837; Token &#24182;&#21152;&#36733;&#20179;&#24211;&#65292;&#28982;&#21518;&#36873;&#25321;&#20179;&#24211;&#26597;&#30475;&#35814;&#24773;</span>
-          <span style="font-size:.75rem;color:var(--text3)">&#25903;&#25345;&#25209;&#37327;&#31649;&#29702;&#21327;&#20316;&#32773;&#26435;&#38480;</span>
+          <span>请填写 Token 并加载仓库，随后选择需要操作的仓库与协作者。</span>
+          <span style="font-size:.75rem;color:var(--text3)">用于批量管理协作者权限的工具</span>
         </div>
         <div id="detail-content" style="display:none">
           <h3 id="detail-repo-name" style="font-size:1rem;margin-bottom:.75rem"></h3>
           <div style="display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap" id="detail-badges"></div>
-          <div style="margin-bottom:1rem">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
-              <span style="font-weight:600;font-size:.9rem">&#21327;&#20316;&#32773; <span id="collab-count" style="color:var(--text3);font-weight:400;font-size:.8rem"></span></span>
-              <button class="btn btn-success btn-sm" id="add-collab-btn" onclick="promptAddCollab()">+ &#28155;&#21152;&#21327;&#20316;&#32773;</button>
+          <div class="detail-columns" style="margin-bottom:1rem">
+            <div class="detail-left">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+                <span style="font-weight:600;font-size:.9rem">协作者 <span id="collab-count" style="color:var(--text3);font-weight:400;font-size:.8rem"></span></span>
+                <button class="btn btn-success btn-sm" id="add-collab-btn" onclick="promptAddCollab()">+ 添加协作者</button>
+              </div>
+              <div class="collab-search-bar">
+                <input type="text" id="collab-search" placeholder="&#128269; 搜索协作者..." autocomplete="off">
+              </div>
+              <div id="collab-batch-bar" style="display:none">
+                <label style="display:flex;align-items:center;gap:.3rem;margin:0;cursor:pointer">
+                  <input type="checkbox" id="collab-select-all" onchange="toggleSelectAllCollabs()" style="margin:0">
+                  <span style="font-size:.8rem">全选</span>
+                </label>
+                <span id="collab-selected-count" style="font-size:.8rem;color:var(--text3);flex:1">已选 0 人</span>
+                <select id="collab-batch-perm">
+                  <option value="pull">只读</option>
+                  <option value="push" selected>读写</option>
+                  <option value="admin">管理员</option>
+                </select>
+                <button class="btn btn-primary btn-sm" id="collab-batch-update-btn" onclick="batchCollabUpdatePerm()" disabled>批量修改权限</button>
+                <button class="btn btn-danger btn-sm" id="collab-batch-remove-btn" onclick="batchCollabRemove()" disabled>批量移除协作者</button>
+              </div>
+              <div id="collab-list"></div>
             </div>
-            <div class="collab-search-bar">
-              <input type="text" id="collab-search" placeholder="&#128269; &#25628;&#32034;&#21327;&#20316;&#32773;..." autocomplete="off">
+            <div class="detail-right">
+              <div id="submodule-section" style="margin-top:1rem">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+                  <span style="font-weight:600;font-size:.9rem">子模块 <span id="submodule-count" style="color:var(--text3);font-weight:400;font-size:.8rem"></span></span>
+                  <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;margin:0">
+                    <input type="checkbox" id="submodule-select-all" onchange="toggleSelectAllSubmodules()"> 全选
+                  </label>
+                </div>
+                <div id="submodule-list"></div>
+              </div>
             </div>
-            <div id="collab-batch-bar" style="display:none">
-              <label style="display:flex;align-items:center;gap:.3rem;margin:0;cursor:pointer">
-                <input type="checkbox" id="collab-select-all" onchange="toggleSelectAllCollabs()" style="margin:0">
-                <span style="font-size:.8rem">&#20840;&#36873;</span>
-              </label>
-              <span id="collab-selected-count" style="font-size:.8rem;color:var(--text3);flex:1">&#24050;&#36873; 0 &#20154;</span>
-              <select id="collab-batch-perm">
-                <option value="pull">&#21482;&#35835;</option>
-                <option value="push" selected>&#35835;&#20889;</option>
-                <option value="admin">&#31649;&#29702;&#21592;</option>
-              </select>
-              <button class="btn btn-primary btn-sm" id="collab-batch-update-btn" onclick="batchCollabUpdatePerm()" disabled>&#20462;&#25913;&#26435;&#38480;</button>
-              <button class="btn btn-danger btn-sm" id="collab-batch-remove-btn" onclick="batchCollabRemove()" disabled>&#31227;&#38500;&#25152;&#36873;</button>
-            </div>
-            <div id="collab-list"></div>
           </div>
         </div>
       </div>
@@ -221,6 +230,11 @@ body {
 <style>
 .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .content-body { flex: 1; overflow-y: auto; padding: 1rem; background: var(--card); }
+/* Detail panel two-column layout */
+.detail-columns { display: flex; gap: 1rem; align-items: flex-start; }
+.detail-left { flex: 1; min-width: 0; }
+.detail-right { width: 420px; max-width: 50%; min-width: 260px; }
+.detail-right .repo-name { max-width: 260px; }
 .collab-item {
   display: flex; align-items: center; padding: .5rem .75rem;
   border-bottom: 1px solid var(--border); gap: .75rem; font-size: .85rem;
@@ -348,6 +362,8 @@ body {
 }
 @media (max-width: 768px) {
   .main-area { flex-direction: column; }
+  .detail-columns { flex-direction: column; }
+  .detail-right { width: auto; min-width: 0; }
   .sidebar { width: 100% !important; min-width: 0 !important; border-right: none !important; border-bottom: 1px solid var(--border); max-height: none; flex: none; }
   .content { flex: 1; min-height: 0; }
   .modal { min-width: auto; width: calc(100vw - 2rem); }
