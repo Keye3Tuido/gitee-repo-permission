@@ -106,6 +106,9 @@ body {
     <span class="topbar-title">&#128273; Gitee &#20179;&#24211;&#26435;&#38480;&#31649;&#29702;&#22120;</span>
     <input type="password" id="token-input" placeholder="Gitee Personal Access Token" style="width:280px">
     <button class="btn btn-ghost btn-sm" onclick="toggleTokenVisibility()">&#128065;</button>
+    <label style="font-size:.8rem;display:flex;align-items:center;gap:.3rem;cursor:pointer">
+      <input type="checkbox" id="remember-toggle" onchange="onRememberToggleChanged(this.checked)"> 记住 Token
+    </label>
     <button class="btn btn-primary" onclick="loadAllRepos()" id="load-btn">&#21152;&#36733;&#20179;&#24211;</button>
     <label style="font-size:.8rem;display:flex;align-items:center;gap:.3rem;cursor:pointer">
       <input type="checkbox" id="org-toggle" checked> &#21253;&#21547;&#32452;&#32455;&#20179;&#24211;

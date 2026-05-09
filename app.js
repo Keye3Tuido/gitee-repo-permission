@@ -16,12 +16,30 @@ let _loadGeneration = 0; // incremented on each loadAllRepos(); Phase 2 checks t
 function getConfig() {
   try {
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
-    stored.token = sessionStorage.getItem('gitee_perm_token') || '';
+    const remember = !!stored.rememberToken;
+    let token = '';
+    if (remember) {
+      token = localStorage.getItem('gitee_perm_token') || '';
+    } else {
+      token = sessionStorage.getItem('gitee_perm_token') || '';
+      if (localStorage.getItem('gitee_perm_token')) localStorage.removeItem('gitee_perm_token');
+    }
+    stored.token = token;
+    stored.rememberToken = remember;
     return stored;
   } catch { return {}; }
 }
 function setConfig(c) {
-  sessionStorage.setItem('gitee_perm_token', c.token || '');
+  c = c || {};
+  const remember = !!c.rememberToken;
+  const token = c.token || '';
+  if (remember) {
+    localStorage.setItem('gitee_perm_token', token);
+    sessionStorage.removeItem('gitee_perm_token');
+  } else {
+    sessionStorage.setItem('gitee_perm_token', token);
+    if (localStorage.getItem('gitee_perm_token')) localStorage.removeItem('gitee_perm_token');
+  }
   const toStore = { ...c }; delete toStore.token;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
 }
@@ -30,11 +48,30 @@ function setConfig(c) {
   const c = getConfig();
   document.getElementById('token-input').value = c.token || '';
   document.getElementById('batch-user').value = c.lastUser || '';
+  var remEl = document.getElementById('remember-toggle');
+  if (remEl) remEl.checked = !!c.rememberToken;
+  // If rememberToken is false, ensure local token cleared for safety
+  if (!c.rememberToken) {
+    if (localStorage.getItem('gitee_perm_token')) localStorage.removeItem('gitee_perm_token');
+  }
 })();
 
 function toggleTokenVisibility() {
   const el = document.getElementById('token-input');
   el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+function onRememberToggleChanged(checked) {
+  var token = document.getElementById('token-input').value.trim();
+  // Immediately clear local token if turning off
+  if (!checked) {
+    if (localStorage.getItem('gitee_perm_token')) localStorage.removeItem('gitee_perm_token');
+  }
+  // Update stored config and token according to choice
+  var cfg = getConfig() || {};
+  cfg.rememberToken = !!checked;
+  cfg.token = token;
+  setConfig(cfg);
 }
 
 function setStatus(msg, right) {
@@ -102,7 +139,8 @@ function setBatchLoading(loading) {
 async function loadAllRepos() {
   const token = getToken();
   if (!token) { setStatus('\u8bf7\u8f93\u5165 Token'); return; }
-  setConfig({ token, lastUser: document.getElementById('batch-user').value.trim() });
+  var remember = document.getElementById('remember-toggle') && document.getElementById('remember-toggle').checked;
+  setConfig({ token, lastUser: document.getElementById('batch-user').value.trim(), rememberToken: remember });
   const btn = document.getElementById('load-btn');
   btn.disabled = true; btn.textContent = '\u52a0\u8f7d\u4e2d\u2026';
   setBatchLoading(true);
@@ -975,7 +1013,8 @@ async function batchAddCollab() {
   const permission = document.getElementById('batch-perm').value;
   if (!username) { setStatus('\u8bf7\u8f93\u5165\u7528\u6237\u540d'); return; }
   if (selectedRepos.size === 0) { setStatus('\u8bf7\u5148\u9009\u62e9\u4ed3\u5e93'); return; }
-  setConfig({ token: getToken(), lastUser: username });
+  var remember = document.getElementById('remember-toggle') && document.getElementById('remember-toggle').checked;
+  setConfig({ token: getToken(), lastUser: username, rememberToken: remember });
 
   const allSelected = Array.from(selectedRepos);
   // Only include repos with confirmed admin permission; skip loading repos and non-admin
