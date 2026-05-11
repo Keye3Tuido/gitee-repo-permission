@@ -56,6 +56,23 @@ body {
   display: flex; align-items: center; justify-content: space-between;
 }
 .sidebar-header span { font-size: .9rem; font-weight: 600; }
+.header-select-toggle {
+  display: inline-flex; align-items: center; gap: .45rem; cursor: pointer;
+  margin: 0; padding: .28rem .55rem; border: 1px solid var(--border);
+  border-radius: 999px; background: var(--hover-bg); color: var(--text2);
+  font-size: .76rem; font-weight: 600; line-height: 1;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.header-select-toggle:hover { background: #eef1f5; border-color: #d2d8e0; }
+.header-select-toggle input[type="checkbox"] {
+  margin: 0; accent-color: var(--primary); cursor: pointer;
+}
+.header-select-toggle:has(input:checked) {
+  background: #fef0f0; border-color: #f2c8ca; color: var(--primary);
+}
+.header-select-toggle:has(input:disabled) {
+  opacity: .55; cursor: not-allowed;
+}
 .sidebar-search {
   padding: .5rem .75rem; border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 4px;
@@ -79,6 +96,7 @@ body {
 .group-header .badge.push { background: var(--success); }
 .group-header .badge.pull { background: var(--text3); }
 .group-header .badge.error { background: var(--danger); }
+.group-header .badge.unauthorized { background: var(--text2); }
 .perm-badge.perm-error { background: var(--danger); color: #fff; }
 .group-header .badge.loading { background: var(--warning); }
 .group-header .toggle { font-size: .7rem; color: var(--text3); }
@@ -96,6 +114,9 @@ body {
 }
 .repo-item .lock-icon { font-size: .7rem; flex-shrink: 0; }
 .repo-item input[type="checkbox"] { flex-shrink: 0; cursor: pointer; }
+.repo-perm-badges {
+  display: flex; gap: .5rem; margin-left: 8px; flex-wrap: wrap;
+}
 /* Mobile tabs hidden on desktop */
 .mobile-tabs { display: none; }
 </style>
@@ -124,9 +145,11 @@ body {
     <div class="sidebar" id="repos-panel">
       <div class="sidebar-header">
         <span>&#20179;&#24211;&#21015;&#34920; <span id="repo-count" style="color:var(--text3);font-weight:400"></span></span>
-        <div style="display:flex;gap:.25rem">
-          <button class="btn btn-ghost btn-sm" onclick="selectAllVisible()" title="&#20840;&#36873;">&#9745;</button>
-          <button class="btn btn-ghost btn-sm" onclick="deselectAll()" title="&#21462;&#28040;&#20840;&#36873;">&#9744;</button>
+        <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+          <label class="header-select-toggle">
+            <input type="checkbox" id="repo-select-all" onchange="toggleSelectAllVisible()"> 全选
+          </label>
+          <button class="btn btn-ghost btn-sm" onclick="openClipboardSelectModal()" title="从剪贴板选中">&#128203; 从剪贴板选中</button>
         </div>
       </div>
       <div id="load-progress-wrap" style="display:none;padding:.3rem .75rem;border-bottom:1px solid var(--border)">
@@ -139,7 +162,7 @@ body {
         </div>
       </div>
       <div class="sidebar-search">
-        <input type="text" id="repo-search" placeholder="&#128269; &#25628;&#32034;&#20179;&#24211;..." autocomplete="off">
+        <input type="text" id="repo-search" placeholder="&#128269; 按仓库名或 URL 搜索..." autocomplete="off">
       </div>
       <div class="repo-list-container" id="repo-list"></div>
       <div class="batch-bar">
@@ -201,9 +224,12 @@ body {
               <div id="submodule-section" style="margin-top:1rem">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
                   <span style="font-weight:600;font-size:.9rem">子模块 <span id="submodule-count" style="color:var(--text3);font-weight:400;font-size:.8rem"></span></span>
-                  <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;margin:0">
-                    <input type="checkbox" id="submodule-select-all" onchange="toggleSelectAllSubmodules()"> 全选
-                  </label>
+                  <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+                    <button class="btn btn-ghost btn-sm" onclick="copyUnauthorizedSubmoduleUrls()">复制无权限和请求失败的链接</button>
+                    <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;margin:0">
+                      <input type="checkbox" id="submodule-select-all" onchange="toggleSelectAllSubmodules()"> 全选
+                    </label>
+                  </div>
                 </div>
                 <div id="submodule-list"></div>
               </div>
@@ -277,14 +303,47 @@ body {
   background: var(--card); border-radius: 12px; padding: 1.5rem;
   min-width: 400px; max-width: 90vw; box-shadow: 0 8px 32px rgba(0,0,0,.15);
 }
+.modal-wide { width: min(860px, 92vw); }
 .modal h3 { font-size: 1rem; margin-bottom: 1rem; }
 .modal label { display: block; font-size: .8rem; color: var(--text2); margin-bottom: .25rem; margin-top: .75rem; }
-.modal input, .modal select {
+.modal input:not([type="checkbox"]), .modal select, .modal textarea {
   width: 100%; padding: .45rem .6rem; border: 1px solid var(--border);
   border-radius: 6px; font-size: .85rem; font-family: inherit;
 }
-.modal input:focus, .modal select:focus { outline: none; border-color: var(--primary); }
+.modal input:not([type="checkbox"]):focus, .modal select:focus, .modal textarea:focus { outline: none; border-color: var(--primary); }
 .modal-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1.25rem; }
+.clipboard-modal-hint {
+  font-size: .8rem; color: var(--text3); margin-bottom: .75rem; line-height: 1.5;
+}
+.clipboard-modal-toolbar {
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .75rem;
+}
+.clipboard-textarea {
+  min-height: 96px; resize: vertical; font-family: var(--mono); margin-bottom: .75rem;
+}
+.clipboard-modal-status {
+  font-size: .8rem; color: var(--text2); margin-bottom: .75rem;
+}
+.clipboard-modal-list {
+  border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+  max-height: 360px; overflow-y: auto; background: var(--card);
+}
+.clipboard-empty {
+  padding: 1rem; color: var(--text3); font-size: .85rem;
+}
+.clipboard-repo-item {
+  display: flex; align-items: flex-start; gap: .75rem; padding: .65rem .75rem;
+  border-bottom: 1px solid var(--border);
+}
+.clipboard-repo-item:last-child { border-bottom: none; }
+.clipboard-repo-item input[type="checkbox"] { margin-top: .15rem; }
+.clipboard-repo-main { flex: 1; min-width: 0; }
+.clipboard-repo-name {
+  font-family: var(--mono); font-size: .8rem; word-break: break-all;
+}
+.clipboard-repo-url {
+  margin-top: .25rem; font-size: .75rem; color: var(--text3); word-break: break-all;
+}
 .log-panel {
   max-height: 200px; overflow-y: auto; font-family: var(--mono); font-size: .75rem;
   background: #1e1e2e; color: #cdd6f4; border-radius: 6px; padding: .5rem .75rem;
@@ -301,6 +360,8 @@ body {
 .tab-bar button.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
 .perm-badge { font-size:.75rem; padding:.2rem .5rem; border-radius:10px; color:#fff; }
 .perm-badge.perm-loading { background: var(--warning); }
+.perm-badge.perm-unauthorized { background: var(--text2); }
+.perm-badge.perm-note { background: var(--hover-bg); color: var(--text2); border: 1px solid var(--border); }
 .repo-link { font-size:.75rem; color:var(--primary); text-decoration:none; }
 .repo-link:hover { text-decoration: underline; }
 .loading-text { color:var(--text3); font-size:.8rem; padding:.5rem; }
