@@ -113,11 +113,11 @@ ESM 容忍，因为所有调用都发生在函数体内（运行时），不在�
 | **modal.js** | `showDowngradeDecisionModal` | 通用 Promise 化模态框（`batch` 三按钮 / `single` 两按钮），无外部依赖 |
 | **userSearch.js** | `setupUserSearch`, `doUserSearch`, `renderUserDropdown`, `closeUserDropdown` | 用户搜索 dropdown，带 `state._userSearchCache` 缓存 |
 | **tabs.js** | `switchTab`, `switchMobileTab` | tab 切换；纯 DOM |
-| **submodules.js** | `getSubmoduleRepos`, `loadSubmodules`, `renderSubmoduleList`, `toggleSelectAllSubmodules`, `copyUnauthorizedSubmoduleUrls` | 解析 `.gitmodules` 并并发拉权限 |
+| **submodules.js** | `getSubmoduleRepos`, `loadSubmodules`, `renderSubmoduleList`, `toggleSelectAllSubmodules`, `copyUnauthorizedSubmoduleUrls`, `copyNonAdminSubmoduleUrls` | 解析 `.gitmodules` 并并发拉权限 |
 | **collabs.js** | `loadRepoDetail`, `renderCollabList`, `updateDetailPermBadges`, `updateCollabPermission`, `removeCollab`, `promptAddCollab`, `batchCollabUpdatePerm`, `batchCollabRemove`, `toggleSelectAllCollabs`, `updateCollabBatchBar` | 当前选中仓库的协作者管理 |
 | **repos.js** | `loadAllRepos`, `renderRepoList`, `toggleSelectAllVisible`, `selectAllVisible`, `deselectAll`, `setBatchLoading`, `getPermGroup`, `openClipboardSelectModal` | 仓库列表加载与渲染、剪贴板导入 |
 | **batch.js** | `batchAddCollab`, `batchRemoveCollab` | 侧栏跨仓库批量授权/移除，含降级预检流程 |
-| **main.js** | （无导出） | 启动 IIFE、四组事件监听、`Object.assign(window, ...)` 暴露 19 个函数 |
+| **main.js** | （无导出） | 启动 IIFE、四组事件监听、`Object.assign(window, ...)` 暴露 20 个函数 |
 
 ## 共享状态模型
 
@@ -200,7 +200,7 @@ openClipboardSelectModal (repos.js)
 
 ## HTML ↔ JS 桥接
 
-`index.html` 内联了 19 个 `onclick="xxx()"` / `onchange="xxx()"` 引用。
+`index.html` 内联了 20 个 `onclick="xxx()"` / `onchange="xxx()"` 引用。
 ES Module 默认作用域隔离，需要 `main.js` 末尾显式挂到 `window`：
 
 ```js

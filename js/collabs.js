@@ -156,7 +156,7 @@ function renderCollabList(filter) {
   var permissionState = getRepoPermissionState(repo);
   var permissionLoading = permissionState === 'loading';
   var permissionFailed = permissionState === 'failed';
-  var isAdmin = !!(repo && !repo.permissionError && repo.permission && repo.permission.admin);
+  var isAdmin = getRepoPermissionState(repo) === 'admin';
 
   if (state.currentCollabs.length === 0) {
     updateCollabBatchBar([], isAdmin);

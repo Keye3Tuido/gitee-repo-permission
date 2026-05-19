@@ -272,10 +272,7 @@ async function loadAllRepos() {
 }
 
 function getPermGroup(repo) {
-  const state = getRepoPermissionState(repo);
-  if (state === 'failed') return 'error';
-  if (state === 'unauthorized') return 'unauthorized';
-  return state;
+  return getRepoPermissionState(repo);
 }
 
 function renderRepoList() {
@@ -283,7 +280,7 @@ function renderRepoList() {
   container.innerHTML = '';
   const filter = document.getElementById('repo-search').value.trim().toLowerCase();
 
-  const groups = { loading: [], unauthorized: [], admin: [], push: [], pull: [], error: [] };
+  const groups = { loading: [], unauthorized: [], admin: [], push: [], pull: [], failed: [] };
   for (var i = 0; i < state.allRepos.length; i++) {
     var r = state.allRepos[i];
     if (!repoMatchesFilter(r, filter)) continue;
@@ -291,7 +288,7 @@ function renderRepoList() {
   }
 
   const GROUP_META = [
-    { key: 'error',   label: '\u6743\u9650\u8bf7\u6c42\u5931\u8d25', cls: 'error' },
+    { key: 'failed',  label: '\u6743\u9650\u8bf7\u6c42\u5931\u8d25', cls: 'failed' },
     { key: 'unauthorized', label: '\u65e0\u6743\u9650', cls: 'unauthorized' },
     { key: 'loading', label: '\u6743\u9650\u52a0\u8f7d\u4e2d', cls: 'loading' },
     { key: 'admin',   label: '\u7ba1\u7406\u5458', cls: 'admin' },

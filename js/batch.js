@@ -6,6 +6,21 @@ import { precheckTargetUserPermissions, classifyDowngrades,
 import { showDowngradeDecisionModal } from './modal.js';
 import { switchTab } from './tabs.js';
 
+function setBatchButtons(disabled) {
+  const addBtn = document.querySelector('.batch-bar .btn-success');
+  const rmBtn = document.querySelector('.batch-bar .btn-danger');
+  const loadBtn = document.getElementById('load-btn');
+  const addCollabBtn = document.getElementById('add-collab-btn');
+  const collabUpdateBtn = document.getElementById('collab-batch-update-btn');
+  const collabRmBtn = document.getElementById('collab-batch-remove-btn');
+  if (addBtn) addBtn.disabled = disabled;
+  if (rmBtn) rmBtn.disabled = disabled;
+  if (loadBtn) loadBtn.disabled = disabled;
+  if (addCollabBtn) addCollabBtn.disabled = disabled;
+  if (collabUpdateBtn) collabUpdateBtn.disabled = disabled;
+  if (collabRmBtn) collabRmBtn.disabled = disabled;
+}
+
 async function batchAddCollab() {
   const username = document.getElementById('batch-user').value.trim();
   const permission = document.getElementById('batch-perm').value;
@@ -35,20 +50,6 @@ async function batchAddCollab() {
   if (skipped > 0) confirmMsg += '\n\n（已自动跳过 ' + skipped + ' 个无管理员权限或权限仍在加载中的仓库）';
   if (!confirm(confirmMsg)) return;
 
-  const addBtn = document.querySelector('.batch-bar .btn-success');
-  const removeBtn = document.querySelector('.batch-bar .btn-danger');
-  const loadBtn = document.getElementById('load-btn');
-  const addCollabBtn = document.getElementById('add-collab-btn');
-  const collabUpdateBtn = document.getElementById('collab-batch-update-btn');
-  const collabRmBtn = document.getElementById('collab-batch-remove-btn');
-  function setBatchButtons(disabled) {
-    if (addBtn) addBtn.disabled = disabled;
-    if (removeBtn) removeBtn.disabled = disabled;
-    if (loadBtn) loadBtn.disabled = disabled;
-    if (addCollabBtn) addCollabBtn.disabled = disabled;
-    if (collabUpdateBtn) collabUpdateBtn.disabled = disabled;
-    if (collabRmBtn) collabRmBtn.disabled = disabled;
-  }
   setBatchButtons(true);
   clearLog();
   switchTab('log');
@@ -160,18 +161,7 @@ async function batchRemoveCollab() {
   if (skipped > 0) confirmMsg += '\n\n\uff08\u5df2\u81ea\u52a8\u8df3\u8fc7 ' + skipped + ' \u4e2a\u65e0\u7ba1\u7406\u5458\u6743\u9650\u6216\u6743\u9650\u4ecd\u5728\u52a0\u8f7d\u4e2d\u7684\u4ed3\u5e93\uff09';
   if (!confirm(confirmMsg)) return;
 
-  const addBtn = document.querySelector('.batch-bar .btn-success');
-  const rmBtn = document.querySelector('.batch-bar .btn-danger');
-  const loadBtn = document.getElementById('load-btn');
-  const addCollabBtn = document.getElementById('add-collab-btn');
-  const collabUpdateBtn = document.getElementById('collab-batch-update-btn');
-  const collabRmBtn = document.getElementById('collab-batch-remove-btn');
-  if (addBtn) addBtn.disabled = true;
-  if (rmBtn) rmBtn.disabled = true;
-  if (loadBtn) loadBtn.disabled = true;
-  if (addCollabBtn) addCollabBtn.disabled = true;
-  if (collabUpdateBtn) collabUpdateBtn.disabled = true;
-  if (collabRmBtn) collabRmBtn.disabled = true;
+  setBatchButtons(true);
   clearLog();
   switchTab('log');
   if (skipped > 0) appendLog('\u5df2\u8df3\u8fc7 ' + skipped + ' \u4e2a\u4ed3\u5e93\uff08\u65e0\u7ba1\u7406\u5458\u6743\u9650\u6216\u6743\u9650\u4ecd\u5728\u52a0\u8f7d\u4e2d\uff09', 'info');
@@ -192,12 +182,7 @@ async function batchRemoveCollab() {
       }
     }
   } finally {
-    if (addBtn) addBtn.disabled = false;
-    if (rmBtn) rmBtn.disabled = false;
-    if (loadBtn) loadBtn.disabled = false;
-    if (addCollabBtn) addCollabBtn.disabled = false;
-    if (collabUpdateBtn) collabUpdateBtn.disabled = false;
-    if (collabRmBtn) collabRmBtn.disabled = false;
+    setBatchButtons(false);
   }
   appendLog('\u5b8c\u6210: ' + ok + ' \u6210\u529f, ' + fail + ' \u5931\u8d25', ok > 0 && fail === 0 ? 'ok' : 'err');
   setStatus('\u6279\u91cf\u79fb\u9664\u5b8c\u6210: ' + ok + ' \u6210\u529f, ' + fail + ' \u5931\u8d25');

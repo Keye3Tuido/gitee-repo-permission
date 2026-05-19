@@ -34,7 +34,10 @@ async function giteeApi(method, path, body) {
   }
   const r = await fetch(url.toString(), opts);
   if (r.status === 204) return null;
-  const data = await r.json().catch(function() { return {}; });
+  const data = await r.json().catch(async function() {
+    const body = await r.text().catch(function() { return ''; });
+    return { message: body ? body.slice(0, 200) : 'parse error' };
+  });
   if (!r.ok) throw new Error('API ' + r.status + ': ' + (data.message || r.statusText));
   return data;
 }
