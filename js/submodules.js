@@ -3,7 +3,8 @@ import { giteeApi } from './api.js';
 import { extractRepoFullNamesFromText, hoverShow, hoverClear,
          copyTextToClipboard, setStatus } from './utils.js';
 import { getRepoApiPath, shouldClearRepoSelection, canSelectRepo,
-         createRepoPermissionBadgeWrap, shouldCopyRestrictedRepoUrl } from './permissions.js';
+         createRepoPermissionBadgeWrap, shouldCopyRestrictedRepoUrl,
+         getRepoPermissionState } from './permissions.js';
 import { renderRepoList } from './repos.js';
 
 async function getSubmoduleRepos(fullName) {
@@ -187,4 +188,27 @@ async function copyUnauthorizedSubmoduleUrls() {
   }
 }
 
-export { getSubmoduleRepos, loadSubmodules, renderSubmoduleList, toggleSelectAllSubmodules, copyUnauthorizedSubmoduleUrls };
+async function copyNonAdminSubmoduleUrls() {
+  if (!state.currentSubmodules || state.currentSubmodules.length === 0) {
+    setStatus('当前没有可复制的子模块');
+    return;
+  }
+  const targets = state.currentSubmodules.filter(function(sub) {
+    return getRepoPermissionState(sub) !== 'admin';
+  });
+  if (targets.length === 0) {
+    setStatus('所有子模块均有管理权限');
+    return;
+  }
+  const text = targets.map(function(sub) {
+    return sub.html_url || ('https://gitee.com/' + sub.full_name);
+  }).join('\n');
+  try {
+    await copyTextToClipboard(text);
+    setStatus('已复制 ' + targets.length + ' 个无管理权限的子模块链接');
+  } catch (e) {
+    setStatus('复制失败: ' + e.message);
+  }
+}
+
+export { getSubmoduleRepos, loadSubmodules, renderSubmoduleList, toggleSelectAllSubmodules, copyUnauthorizedSubmoduleUrls, copyNonAdminSubmoduleUrls };

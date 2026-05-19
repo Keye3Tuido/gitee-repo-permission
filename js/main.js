@@ -68,6 +68,7 @@ Object.assign(window, {
   // submodules.js
   toggleSelectAllSubmodules: submodules.toggleSelectAllSubmodules,
   copyUnauthorizedSubmoduleUrls: submodules.copyUnauthorizedSubmoduleUrls,
+  copyNonAdminSubmoduleUrls: submodules.copyNonAdminSubmoduleUrls,
   // tabs.js
   switchTab: tabs.switchTab,
   switchMobileTab: tabs.switchMobileTab,

@@ -226,6 +226,7 @@ body {
                   <span style="font-weight:600;font-size:.9rem">子模块 <span id="submodule-count" style="color:var(--text3);font-weight:400;font-size:.8rem"></span></span>
                   <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
                     <button class="btn btn-ghost btn-sm" onclick="copyUnauthorizedSubmoduleUrls()">复制无权限和请求失败的链接</button>
+                    <button class="btn btn-ghost btn-sm" onclick="copyNonAdminSubmoduleUrls()">复制无管理权限的仓库列表</button>
                     <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;margin:0">
                       <input type="checkbox" id="submodule-select-all" onchange="toggleSelectAllSubmodules()"> 全选
                     </label>
