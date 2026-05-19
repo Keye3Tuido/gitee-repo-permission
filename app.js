@@ -1492,11 +1492,53 @@ async function batchCollabUpdatePerm() {
   var permLabels = { pull: '\u53ea\u8bfb', push: '\u8bfb\u5199', admin: '\u7ba1\u7406\u5458' };
   var permLabel = permLabels[permission] || permission;
   var logins = Array.from(selectedCollabs);
-  var isSelf = currentUser && logins.some(function(l) { return l.toLowerCase() === currentUser.toLowerCase(); });
-  var msg = isSelf
-    ? '\u26a0\ufe0f \u8b66\u544a\uff1a\u9009\u4e2d\u5217\u8868\u4e2d\u5305\u542b\u300a\u4f60\u81ea\u5df1\u300b\uff0c\u5c06\u4fee\u6539\u4f60\u5728 ' + currentRepo + ' \u7684\u6743\u9650\u4e3a ' + permLabel + '\uff01\n\n\u786e\u5b9a\u8981\u7ee7\u7eed\u5417\uff1f'
-    : '\u786e\u5b9a\u5c06\u4ee5\u4e0b ' + logins.length + ' \u4f4d\u534f\u4f5c\u8005\u5728 ' + currentRepo + ' \u7684\u6743\u9650\u4fee\u6539\u4e3a ' + permLabel + '(' + permission + ')\uff1f\n\n' + logins.join(', ');
-  if (!confirm(msg)) return;
+  var isSelf = !!(currentUser && logins.some(function(l) { return l.toLowerCase() === currentUser.toLowerCase(); }));
+
+  // Classify downgrades against currentCollabs cache (no API call needed)
+  var targetLevel = PERM_LEVEL[permission];
+  var dgRows = [];
+  var safeLogins = [];
+  for (var li = 0; li < logins.length; li++) {
+    var login = logins[li];
+    var curLvl = getCurrentPermLevel(currentRepo, login);
+    if (curLvl >= 0 && curLvl > targetLevel) {
+      dgRows.push({
+        title: login + (isSelf && login.toLowerCase() === (currentUser || '').toLowerCase() ? '  \u26d4\u81ea\u5df1' : ''),
+        sub: permLevelToLabel(curLvl) + ' \u2192 ' + permLabel + '(' + permission + ')',
+        login: login,
+      });
+    } else {
+      safeLogins.push(login);
+    }
+  }
+
+  var finalLogins;
+  if (dgRows.length > 0) {
+    var decision = await showDowngradeDecisionModal({
+      mode: 'batch',
+      scope: '\u534f\u4f5c\u8005',
+      isSelf: isSelf,
+      targetPermLabel: permLabel + '(' + permission + ')',
+      headerText: '\u5373\u5c06\u5728 ' + currentRepo + ' \u4e2d\u5c06\u9009\u4e2d\u534f\u4f5c\u8005\u6743\u9650\u4fee\u6539\u4e3a ' + permLabel + '(' + permission + ')\u3002\u4ee5\u4e0b\u534f\u4f5c\u8005\u4f1a\u53d1\u751f\u964d\u7ea7\uff1a',
+      downgrades: dgRows,
+      failed: [],
+      safeCount: safeLogins.length,
+    });
+    if (decision === 'cancel') return;
+    if (decision === 'skip') finalLogins = safeLogins;
+    else finalLogins = logins;
+  } else {
+    var confirmMsg = isSelf
+      ? '\u26a0\ufe0f \u8b66\u544a\uff1a\u9009\u4e2d\u5217\u8868\u4e2d\u5305\u542b\u3010\u4f60\u81ea\u5df1\u3011\uff0c\u5c06\u4fee\u6539\u4f60\u5728 ' + currentRepo + ' \u7684\u6743\u9650\u4e3a ' + permLabel + '(' + permission + ')\u3002\n\n\u786e\u5b9a\u8981\u7ee7\u7eed\u5417\uff1f'
+      : '\u786e\u5b9a\u5c06\u4ee5\u4e0b ' + logins.length + ' \u4f4d\u534f\u4f5c\u8005\u5728 ' + currentRepo + ' \u7684\u6743\u9650\u4fee\u6539\u4e3a ' + permLabel + '(' + permission + ')\uff1f\n\n' + logins.join(', ');
+    if (!confirm(confirmMsg)) return;
+    finalLogins = logins;
+  }
+
+  if (finalLogins.length === 0) {
+    setStatus('\u6ca1\u6709\u9700\u8981\u6267\u884c\u7684\u534f\u4f5c\u8005');
+    return;
+  }
 
   var loadBtn = document.getElementById('load-btn');
   var addBtn = document.getElementById('add-collab-btn');
@@ -1508,19 +1550,22 @@ async function batchCollabUpdatePerm() {
   if (rmBtn) rmBtn.disabled = true;
   setBatchLoading(true);
   switchTab('log'); clearLog();
-  appendLog('\u5f00\u59cb\u6279\u91cf\u4fee\u6539\u6743\u9650: ' + permission + ' (' + logins.length + ' \u4eba)', 'info');
-  setStatus('\u6279\u91cf\u4fee\u6539\u6743\u9650\u4e2d\u2026 0/' + logins.length);
+  if (finalLogins.length !== logins.length) {
+    appendLog('\u5df2\u5ffd\u7565 ' + (logins.length - finalLogins.length) + ' \u4f4d\u964d\u7ea7\u534f\u4f5c\u8005', 'info');
+  }
+  appendLog('\u5f00\u59cb\u6279\u91cf\u4fee\u6539\u6743\u9650: ' + permission + ' (' + finalLogins.length + ' \u4eba)', 'info');
+  setStatus('\u6279\u91cf\u4fee\u6539\u6743\u9650\u4e2d\u2026 0/' + finalLogins.length);
 
   var ok = 0, fail = 0;
   try {
-    for (var i = 0; i < logins.length; i++) {
-      setStatus('\u6279\u91cf\u4fee\u6539\u6743\u9650\u4e2d\u2026 ' + (i + 1) + '/' + logins.length);
+    for (var i = 0; i < finalLogins.length; i++) {
+      setStatus('\u6279\u91cf\u4fee\u6539\u6743\u9650\u4e2d\u2026 ' + (i + 1) + '/' + finalLogins.length);
       try {
-        await giteeApi('PUT', '/repos/' + currentRepo + '/collaborators/' + logins[i], { permission: permission });
-        appendLog('\u2713 ' + logins[i], 'ok');
+        await giteeApi('PUT', '/repos/' + currentRepo + '/collaborators/' + finalLogins[i], { permission: permission });
+        appendLog('\u2713 ' + finalLogins[i], 'ok');
         ok++;
       } catch (e) {
-        appendLog('\u2717 ' + logins[i] + ': ' + e.message, 'err');
+        appendLog('\u2717 ' + finalLogins[i] + ': ' + e.message, 'err');
         fail++;
       }
     }
@@ -1608,28 +1653,236 @@ function getCurrentPermLevel(repoFullName, username) {
   return -1; // not found in cached collaborators
 }
 
+function permLevelToLabel(level) {
+  if (level === 2) return '管理员(admin)';
+  if (level === 1) return '读写(push)';
+  if (level === 0) return '只读(pull)';
+  if (level === -1) return '未授权';
+  return '未知';
+}
+
+async function fetchTargetUserPermLevel(repoFullName, username) {
+  try {
+    var collabs = await giteeApiFetchAll('/repos/' + repoFullName + '/collaborators');
+    var unameLower = username.toLowerCase();
+    var c = collabs.find(function(x) { return x.login && x.login.toLowerCase() === unameLower; });
+    if (!c) return { level: -1, error: false };
+    var raw = c.permissions || c.permission;
+    if (typeof raw === 'string') {
+      var lvl = PERM_LEVEL[raw];
+      return { level: lvl !== undefined ? lvl : null, error: lvl === undefined };
+    }
+    if (raw && typeof raw === 'object') {
+      if (raw.admin) return { level: 2, error: false };
+      if (raw.push)  return { level: 1, error: false };
+      return { level: 0, error: false };
+    }
+    return { level: null, error: true };
+  } catch (e) {
+    return { level: null, error: true };
+  }
+}
+
+async function precheckTargetUserPermissions(repos, username) {
+  var levelMap = new Map();
+  var i = 0;
+  var done = 0;
+  var concurrency = Math.min(5, repos.length);
+  async function worker() {
+    while (i < repos.length) {
+      var idx = i++;
+      var repo = repos[idx];
+      var res = await fetchTargetUserPermLevel(repo, username);
+      levelMap.set(repo, res);
+      done++;
+      setStatus('预检中… ' + done + '/' + repos.length);
+    }
+  }
+  var workers = [];
+  for (var w = 0; w < concurrency; w++) workers.push(worker());
+  await Promise.all(workers);
+  return { levelMap: levelMap };
+}
+
+function classifyDowngrades(repos, levelMap, targetLevel) {
+  var downgrades = [];
+  var failed = [];
+  var safe = [];
+  for (var i = 0; i < repos.length; i++) {
+    var repo = repos[i];
+    var entry = levelMap.get(repo);
+    if (!entry || entry.error || entry.level === null) {
+      failed.push({ repo: repo });
+      continue;
+    }
+    if (entry.level > targetLevel) {
+      downgrades.push({ repo: repo, currentLevel: entry.level, currentLabel: permLevelToLabel(entry.level) });
+    } else {
+      safe.push({ repo: repo, currentLevel: entry.level });
+    }
+  }
+  return { downgrades: downgrades, failed: failed, safe: safe };
+}
+
+// Modal returns Promise<'keep' | 'skip' | 'cancel'>.
+// opts: {
+//   mode: 'batch' | 'single',
+//   scope: '仓库' | '协作者',          // semantic of each row
+//   headerText,                          // line above downgrade list
+//   isSelf,
+//   targetPermLabel,
+//   downgrades: [{ title, sub }],        // sub is "currentLabel → targetLabel"
+//   failed:     [{ title }],
+//   safeCount,
+// }
+function showDowngradeDecisionModal(opts) {
+  return new Promise(function(resolve) {
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    var modal = document.createElement('div');
+    modal.className = 'modal modal-wide';
+
+    var h3 = document.createElement('h3');
+    h3.textContent = '⚠️ 检测到权限降级';
+    h3.style.color = 'var(--warning)';
+    modal.appendChild(h3);
+
+    var desc = document.createElement('div');
+    desc.className = 'clipboard-modal-hint';
+    desc.textContent = opts.headerText || '';
+    modal.appendChild(desc);
+
+    if (opts.isSelf) {
+      var selfNote = document.createElement('div');
+      selfNote.style.color = 'var(--danger)';
+      selfNote.style.fontWeight = '600';
+      selfNote.style.margin = '.25rem 0 .75rem';
+      selfNote.textContent = '⛔ 警告：操作涉及【你自己】，降级后可能无法自行恢复！';
+      modal.appendChild(selfNote);
+    }
+
+    function buildSection(title, rows, rowBg, makeRow) {
+      if (!rows || rows.length === 0) return;
+      var wrap = document.createElement('div');
+      var t = document.createElement('div');
+      t.style.fontWeight = '600';
+      t.style.margin = '.75rem 0 .25rem 0';
+      t.textContent = title + ' (' + rows.length + ')';
+      wrap.appendChild(t);
+      var list = document.createElement('div');
+      list.className = 'clipboard-modal-list';
+      for (var i = 0; i < rows.length; i++) {
+        var item = document.createElement('div');
+        item.className = 'clipboard-repo-item';
+        item.style.background = rowBg;
+        item.appendChild(makeRow(rows[i]));
+        list.appendChild(item);
+      }
+      wrap.appendChild(list);
+      modal.appendChild(wrap);
+    }
+
+    buildSection('降级' + (opts.scope || '仓库'), opts.downgrades, '#fff4e6', function(r) {
+      var main = document.createElement('div');
+      main.className = 'clipboard-repo-main';
+      var name = document.createElement('div');
+      name.className = 'clipboard-repo-name';
+      name.textContent = r.title;
+      var sub = document.createElement('div');
+      sub.className = 'clipboard-repo-url';
+      sub.textContent = r.sub;
+      main.appendChild(name);
+      main.appendChild(sub);
+      return main;
+    });
+
+    buildSection('权限未知（预检失败）', opts.failed, '#f5f5f5', function(r) {
+      var main = document.createElement('div');
+      main.className = 'clipboard-repo-main';
+      var name = document.createElement('div');
+      name.className = 'clipboard-repo-name';
+      name.textContent = r.title;
+      var sub = document.createElement('div');
+      sub.className = 'clipboard-repo-url';
+      sub.textContent = '无法确定该' + (opts.scope === '协作者' ? '协作者' : '用户') + '的现有权限';
+      main.appendChild(name);
+      main.appendChild(sub);
+      return main;
+    });
+
+    if (opts.mode === 'batch' && opts.safeCount > 0) {
+      var safeSummary = document.createElement('div');
+      safeSummary.className = 'clipboard-modal-status';
+      safeSummary.style.marginTop = '.5rem';
+      safeSummary.textContent = '另有 ' + opts.safeCount + ' 个非降级' + (opts.scope || '仓库') + '（新增或同级 / 升级），不受影响。';
+      modal.appendChild(safeSummary);
+    }
+
+    var actions = document.createElement('div');
+    actions.className = 'modal-actions';
+
+    function close(result) { overlay.remove(); resolve(result); }
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn btn-ghost';
+    cancelBtn.textContent = '取消';
+    cancelBtn.onclick = function() { close('cancel'); };
+    actions.appendChild(cancelBtn);
+
+    if (opts.mode === 'batch') {
+      var skipBtn = document.createElement('button');
+      skipBtn.className = 'btn btn-primary';
+      skipBtn.textContent = '忽略降级（仅执行 ' + opts.safeCount + ' 个非降级）';
+      skipBtn.disabled = !opts.safeCount;
+      if (skipBtn.disabled) skipBtn.title = '没有可执行的非降级项';
+      skipBtn.onclick = function() { close('skip'); };
+      actions.appendChild(skipBtn);
+    }
+
+    var keepBtn = document.createElement('button');
+    keepBtn.className = 'btn btn-danger';
+    keepBtn.textContent = opts.mode === 'batch' ? '保留降级（按选择全部执行）' : '保留降级（继续执行）';
+    keepBtn.onclick = function() { close('keep'); };
+    actions.appendChild(keepBtn);
+
+    modal.appendChild(actions);
+    overlay.appendChild(modal);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) close('cancel'); });
+    document.getElementById('modal-container').appendChild(overlay);
+  });
+}
+
 async function updateCollabPermission(repoFullName, username, permission) {
   var permLabels = { pull: '只读', push: '读写', admin: '管理员' };
   var permLabel = permLabels[permission] || permission;
+  var isSelf = !!(currentUser && username.toLowerCase() === currentUser.toLowerCase());
+  var curLevel = getCurrentPermLevel(repoFullName, username);
+  var newLevel = PERM_LEVEL[permission] !== undefined ? PERM_LEVEL[permission] : -1;
+  var isDowngrade = curLevel >= 0 && curLevel > newLevel;
 
-  // Detect self-modification with stronger warning
-  if (currentUser && username.toLowerCase() === currentUser.toLowerCase()) {
-    var curLevel = getCurrentPermLevel(repoFullName, username);
-    var newLevel = PERM_LEVEL[permission] !== undefined ? PERM_LEVEL[permission] : -1;
-    var isDemotion = curLevel > newLevel;
-
-    var msg = '⚠️ 警告：你正在修改【自己】在 ' + repoFullName + ' 的权限为 ' + permLabel + '(' + permission + ')！\n\n';
-    if (isDemotion) {
-      msg += '⛔ 这是一个降级操作！降级后你可能无法恢复自己的权限！\n\n确定要继续吗？';
-    } else {
-      msg += '确定要继续吗？';
-    }
-    if (!confirm(msg)) {
+  if (isDowngrade) {
+    var decision = await showDowngradeDecisionModal({
+      mode: 'single',
+      scope: '仓库',
+      isSelf: isSelf,
+      targetPermLabel: permLabel + '(' + permission + ')',
+      headerText: '即将将 ' + username + ' 在 ' + repoFullName + ' 的权限修改为 ' + permLabel + '(' + permission + ')，将发生降级：',
+      downgrades: [{
+        title: repoFullName,
+        sub: permLevelToLabel(curLevel) + ' → ' + permLabel + '(' + permission + ')',
+      }],
+      failed: [],
+      safeCount: 0,
+    });
+    if (decision !== 'keep') {
       loadRepoDetail(repoFullName);
       return;
     }
   } else {
-    if (!confirm('确定将 ' + username + ' 在 ' + repoFullName + ' 的权限修改为 ' + permLabel + '(' + permission + ')？')) {
+    var msg = isSelf
+      ? '⚠️ 警告：你正在修改【自己】在 ' + repoFullName + ' 的权限为 ' + permLabel + '(' + permission + ')。\n\n确定要继续吗？'
+      : '确定将 ' + username + ' 在 ' + repoFullName + ' 的权限修改为 ' + permLabel + '(' + permission + ')？';
+    if (!confirm(msg)) {
       loadRepoDetail(repoFullName);
       return;
     }
@@ -1731,11 +1984,10 @@ function promptAddCollab() {
 async function batchAddCollab() {
   const username = document.getElementById('batch-user').value.trim();
   const permission = document.getElementById('batch-perm').value;
-  if (!username) { setStatus('\u8bf7\u8f93\u5165\u7528\u6237\u540d'); return; }
-  if (selectedRepos.size === 0) { setStatus('\u8bf7\u5148\u9009\u62e9\u4ed3\u5e93'); return; }
+  if (!username) { setStatus('请输入用户名'); return; }
+  if (selectedRepos.size === 0) { setStatus('请先选择仓库'); return; }
 
   const allSelected = Array.from(selectedRepos);
-  // Only include repos with confirmed admin permission; skip loading repos and non-admin
   var repos = allSelected.filter(function(fn) {
     var r = allRepos.find(function(x) { return x.full_name === fn; });
     if (!r) return false;
@@ -1743,33 +1995,19 @@ async function batchAddCollab() {
   });
   var skipped = allSelected.length - repos.length;
   if (repos.length === 0) {
-    setStatus('\u6240\u9009\u4ed3\u5e93\u5747\u65e0\u7ba1\u7406\u5458\u6743\u9650\uff08\u6216\u6743\u9650\u4ecd\u5728\u52a0\u8f7d\u4e2d\uff09');
-    if (skipped > 0) appendLog('\u5df2\u8df3\u8fc7 ' + skipped + ' \u4e2a\u4ed3\u5e93\uff08\u65e0\u7ba1\u7406\u5458\u6743\u9650\u6216\u6743\u9650\u4ecd\u5728\u52a0\u8f7d\u4e2d\uff09', 'err');
+    setStatus('所选仓库均无管理员权限（或权限仍在加载中）');
+    if (skipped > 0) appendLog('已跳过 ' + skipped + ' 个仓库（无管理员权限或权限仍在加载中）', 'err');
     return;
   }
 
-  var isSelf = currentUser && username.toLowerCase() === currentUser.toLowerCase();
-  var confirmMsg;
-  if (isSelf) {
-    var newLevel = PERM_LEVEL[permission] !== undefined ? PERM_LEVEL[permission] : -1;
-    var demotionCount = 0;
-    for (var di = 0; di < repos.length; di++) {
-      var repo = allRepos.find(function(r) { return r.full_name === repos[di]; });
-      if (repo && repo.permissionLoaded && !repo.permissionError) {
-        var rp = repo.permission;
-        var curLvl = rp.admin ? 2 : rp.push ? 1 : 0;
-        if (curLvl > newLevel) demotionCount++;
-      }
-    }
-    if (demotionCount > 0) {
-      confirmMsg = '⚠️ 警告：你正在批量修改【自己】在 ' + repos.length + ' 个仓库的权限为 ' + permission + '！\n\n⛔ 其中 ' + demotionCount + ' 个仓库是降级操作，降级后你可能无法恢复权限！\n\n确定要继续吗？';
-    } else {
-      confirmMsg = '你正在批量修改【自己】在 ' + repos.length + ' 个仓库的权限为 ' + permission + '，确定要继续吗？';
-    }
-  } else {
-    confirmMsg = '\u786e\u5b9a\u4e3a ' + username + ' \u6dfb\u52a0 ' + permission + ' \u6743\u9650\u5230 ' + repos.length + ' \u4e2a\u4ed3\u5e93\uff1f';
-  }
-  if (skipped > 0) confirmMsg += '\n\n\uff08\u5df2\u81ea\u52a8\u8df3\u8fc7 ' + skipped + ' \u4e2a\u65e0\u7ba1\u7406\u5458\u6743\u9650\u6216\u6743\u9650\u4ecd\u5728\u52a0\u8f7d\u4e2d\u7684\u4ed3\u5e93\uff09';
+  var permLabels = { pull: '只读', push: '读写', admin: '管理员' };
+  var permLabel = permLabels[permission] || permission;
+  var isSelf = !!(currentUser && username.toLowerCase() === currentUser.toLowerCase());
+
+  var confirmMsg = isSelf
+    ? '⚠️ 警告：你正在批量修改【自己】在 ' + repos.length + ' 个仓库的权限为 ' + permLabel + '(' + permission + ')。\n\n确定要继续吗？'
+    : '确定为 ' + username + ' 添加 ' + permLabel + '(' + permission + ') 权限到 ' + repos.length + ' 个仓库？';
+  if (skipped > 0) confirmMsg += '\n\n（已自动跳过 ' + skipped + ' 个无管理员权限或权限仍在加载中的仓库）';
   if (!confirm(confirmMsg)) return;
 
   const addBtn = document.querySelector('.batch-bar .btn-success');
@@ -1778,41 +2016,94 @@ async function batchAddCollab() {
   const addCollabBtn = document.getElementById('add-collab-btn');
   const collabUpdateBtn = document.getElementById('collab-batch-update-btn');
   const collabRmBtn = document.getElementById('collab-batch-remove-btn');
-  if (addBtn) addBtn.disabled = true;
-  if (removeBtn) removeBtn.disabled = true;
-  if (loadBtn) loadBtn.disabled = true;
-  if (addCollabBtn) addCollabBtn.disabled = true;
-  if (collabUpdateBtn) collabUpdateBtn.disabled = true;
-  if (collabRmBtn) collabRmBtn.disabled = true;
+  function setBatchButtons(disabled) {
+    if (addBtn) addBtn.disabled = disabled;
+    if (removeBtn) removeBtn.disabled = disabled;
+    if (loadBtn) loadBtn.disabled = disabled;
+    if (addCollabBtn) addCollabBtn.disabled = disabled;
+    if (collabUpdateBtn) collabUpdateBtn.disabled = disabled;
+    if (collabRmBtn) collabRmBtn.disabled = disabled;
+  }
+  setBatchButtons(true);
   clearLog();
   switchTab('log');
-  if (skipped > 0) appendLog('\u5df2\u8df3\u8fc7 ' + skipped + ' \u4e2a\u4ed3\u5e93\uff08\u65e0\u7ba1\u7406\u5458\u6743\u9650\u6216\u6743\u9650\u4ecd\u5728\u52a0\u8f7d\u4e2d\uff09', 'info');
-  appendLog('\u5f00\u59cb\u6279\u91cf\u6dfb\u52a0: ' + username + ' -> ' + permission + ' (' + repos.length + ' \u4e2a\u4ed3\u5e93)', 'info');
-  setStatus('\u6279\u91cf\u6dfb\u52a0\u4e2d\u2026 0/' + repos.length);
+  if (skipped > 0) appendLog('已跳过 ' + skipped + ' 个仓库（无管理员权限或权限仍在加载中）', 'info');
+
+  appendLog('正在预检 ' + username + ' 在所选仓库的现有权限…', 'info');
+  setStatus('预检中… 0/' + repos.length);
+  var precheck;
+  try {
+    precheck = await precheckTargetUserPermissions(repos, username);
+  } catch (e) {
+    appendLog('预检失败: ' + e.message, 'err');
+    setStatus('预检失败');
+    setBatchButtons(false);
+    return;
+  }
+  var classify = classifyDowngrades(repos, precheck.levelMap, PERM_LEVEL[permission]);
+
+  var finalRepos;
+  if (classify.downgrades.length > 0 || classify.failed.length > 0) {
+    var dgRows = classify.downgrades.map(function(d) {
+      return { title: d.repo, sub: d.currentLabel + ' → ' + permLabel + '(' + permission + ')' };
+    });
+    var failedRows = classify.failed.map(function(f) { return { title: f.repo }; });
+    setStatus('请处理降级仓库');
+    var decision = await showDowngradeDecisionModal({
+      mode: 'batch',
+      scope: '仓库',
+      isSelf: isSelf,
+      targetPermLabel: permLabel + '(' + permission + ')',
+      headerText: '即将为 ' + username + ' 在 ' + repos.length + ' 个仓库授予 ' + permLabel + '(' + permission + ')。请明确处理以下情况：',
+      downgrades: dgRows,
+      failed: failedRows,
+      safeCount: classify.safe.length,
+    });
+    if (decision === 'cancel') {
+      appendLog('操作已取消', 'info');
+      setStatus('操作已取消');
+      setBatchButtons(false);
+      return;
+    }
+    if (decision === 'skip') {
+      finalRepos = classify.safe.map(function(s) { return s.repo; });
+      appendLog('已忽略 ' + classify.downgrades.length + ' 个降级仓库与 ' + classify.failed.length + ' 个权限未知仓库', 'info');
+    } else {
+      finalRepos = repos;
+      if (classify.downgrades.length > 0) appendLog('用户选择保留降级：将对 ' + classify.downgrades.length + ' 个降级仓库继续执行', 'info');
+    }
+  } else {
+    finalRepos = repos;
+  }
+
+  if (finalRepos.length === 0) {
+    appendLog('没有需要执行的仓库', 'info');
+    setStatus('完成: 0 成功, 0 失败');
+    setBatchButtons(false);
+    return;
+  }
+
+  appendLog('开始批量添加: ' + username + ' -> ' + permission + ' (' + finalRepos.length + ' 个仓库)', 'info');
+  setStatus('批量添加中… 0/' + finalRepos.length);
 
   let ok = 0, fail = 0;
   try {
-    for (let i = 0; i < repos.length; i++) {
-      setStatus('\u6279\u91cf\u6dfb\u52a0\u4e2d\u2026 ' + (i + 1) + '/' + repos.length);
+    for (let i = 0; i < finalRepos.length; i++) {
+      setStatus('批量添加中… ' + (i + 1) + '/' + finalRepos.length);
       try {
-        await giteeApi('PUT', '/repos/' + repos[i] + '/collaborators/' + username, { permission: permission });
-        appendLog('\u2713 ' + repos[i], 'ok');
+        await giteeApi('PUT', '/repos/' + finalRepos[i] + '/collaborators/' + username, { permission: permission });
+        appendLog('✓ ' + finalRepos[i], 'ok');
         ok++;
       } catch (e) {
-        appendLog('\u2717 ' + repos[i] + ': ' + e.message, 'err');
+        appendLog('✗ ' + finalRepos[i] + ': ' + e.message, 'err');
         fail++;
       }
     }
   } finally {
-    if (addBtn) addBtn.disabled = false;
-    if (removeBtn) removeBtn.disabled = false;
-    if (loadBtn) loadBtn.disabled = false;
-    if (addCollabBtn) addCollabBtn.disabled = false;
-    if (collabUpdateBtn) collabUpdateBtn.disabled = false;
-    if (collabRmBtn) collabRmBtn.disabled = false;
+    setBatchButtons(false);
   }
-  appendLog('\u5b8c\u6210: ' + ok + ' \u6210\u529f, ' + fail + ' \u5931\u8d25', ok > 0 && fail === 0 ? 'ok' : 'err');
-  setStatus('\u6279\u91cf\u6dfb\u52a0\u5b8c\u6210: ' + ok + ' \u6210\u529f, ' + fail + ' \u5931\u8d25');
+  appendLog('完成: ' + ok + ' 成功, ' + fail + ' 失败', ok > 0 && fail === 0 ? 'ok' : 'err');
+  setStatus('批量添加完成: ' + ok + ' 成功, ' + fail + ' 失败');
 }
 
 async function batchRemoveCollab() {
