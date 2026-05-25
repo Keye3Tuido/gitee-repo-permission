@@ -492,6 +492,10 @@ function openClipboardSelectModal() {
   copyUnauthorizedBtn.className = 'btn btn-ghost btn-sm';
   copyUnauthorizedBtn.textContent = '复制无权限或失败仓库链接';
   resultToolbar.appendChild(copyUnauthorizedBtn);
+  const copyNonAdminBtn = document.createElement('button');
+  copyNonAdminBtn.className = 'btn btn-ghost btn-sm';
+  copyNonAdminBtn.textContent = '复制无管理权限的仓库列表';
+  resultToolbar.appendChild(copyNonAdminBtn);
   modal.appendChild(resultToolbar);
 
   const list = document.createElement('div');
@@ -651,6 +655,25 @@ function openClipboardSelectModal() {
     }
   }
 
+  async function copyNonAdminRepoUrls() {
+    const repos = parsedRepos.filter(function(repo) {
+      return getRepoPermissionState(repo) !== 'admin';
+    });
+    if (repos.length === 0) {
+      setStatus('所有解析仓库均有管理权限');
+      return;
+    }
+    const text = repos.map(function(repo) {
+      return repo.html_url || ('https://gitee.com/' + repo.full_name);
+    }).join('\n');
+    try {
+      await copyTextToClipboard(text);
+      setStatus('已复制 ' + repos.length + ' 个无管理权限的仓库链接');
+    } catch (e) {
+      setStatus('复制失败: ' + e.message);
+    }
+  }
+
   function refreshParsedRepoPermissions(repos, requestVersion) {
     for (let i = 0; i < repos.length; i++) {
       (function(repo) {
@@ -689,6 +712,7 @@ function openClipboardSelectModal() {
   }
 
   copyUnauthorizedBtn.onclick = function() { copyUnauthorizedRepoUrls(); };
+  copyNonAdminBtn.onclick = function() { copyNonAdminRepoUrls(); };
   selectAllInput.onchange = function() { toggleSelectAllParsedRepos(); };
   parseBtn.onclick = function() {
     clipboardReadVersion++;
