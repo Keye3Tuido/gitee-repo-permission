@@ -10,6 +10,7 @@ import { extractRepoFullNamesFromText, hoverShow, hoverClear } from './utils.js'
 import { switchMobileTab } from './tabs.js';
 import { loadRepoDetail, updateDetailPermBadges } from './collabs.js';
 import { renderSubmoduleList } from './submodules.js';
+import { showRepoContextMenu } from './contextMenu.js';
 
 function setBatchLoading(loading) {
   var addBtn = document.querySelector('.batch-bar .btn-success');
@@ -371,6 +372,10 @@ function renderRepoList() {
             loadRepoDetail(repo.full_name);
             if (window.innerWidth <= 768) switchMobileTab('detail');
           };
+          div.oncontextmenu = function(e) {
+            e.preventDefault();
+            showRepoContextMenu(repo, e.clientX, e.clientY);
+          };
           container.appendChild(div);
         })(repos[ri]);
       }
@@ -725,4 +730,22 @@ function openClipboardSelectModal() {
   setTimeout(function() { textarea.focus(); }, 50);
 }
 
-export { setBatchLoading, loadAllRepos, getPermGroup, renderRepoList, toggleSelectAllVisible, selectAllVisible, deselectAll, openClipboardSelectModal };
+async function copySelectedRepoUrls() {
+  const selected = Array.from(state.selectedRepos);
+  if (selected.length === 0) {
+    setStatus('请先选中仓库');
+    return;
+  }
+  const urls = selected.map(function(fullName) {
+    const repo = state.allRepos.find(function(r) { return r.full_name === fullName; });
+    return repo && repo.html_url ? repo.html_url : ('https://gitee.com/' + fullName);
+  }).join('\n');
+  try {
+    await copyTextToClipboard(urls);
+    setStatus('已复制 ' + selected.length + ' 个仓库链接');
+  } catch (e) {
+    setStatus('复制失败: ' + e.message);
+  }
+}
+
+export { setBatchLoading, loadAllRepos, getPermGroup, renderRepoList, toggleSelectAllVisible, selectAllVisible, deselectAll, openClipboardSelectModal, copySelectedRepoUrls };

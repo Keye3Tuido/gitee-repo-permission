@@ -6,6 +6,7 @@ import { getRepoApiPath, shouldClearRepoSelection, canSelectRepo,
          createRepoPermissionBadgeWrap, shouldCopyRestrictedRepoUrl,
          getRepoPermissionState } from './permissions.js';
 import { renderRepoList } from './repos.js';
+import { showSubmoduleContextMenu } from './contextMenu.js';
 
 async function getSubmoduleRepos(fullName) {
   try {
@@ -136,6 +137,10 @@ function renderSubmoduleList() {
     div.title = s.full_name;
     div.onmouseenter = function() { hoverShow(s.full_name, s.html_url); };
     div.onmouseleave = function() { hoverClear(); };
+    div.oncontextmenu = function(e) {
+      e.preventDefault();
+      showSubmoduleContextMenu(s, e.clientX, e.clientY);
+    };
 
     div.appendChild(createRepoPermissionBadgeWrap(s));
     wrap.appendChild(div);
@@ -211,4 +216,27 @@ async function copyNonAdminSubmoduleUrls() {
   }
 }
 
-export { getSubmoduleRepos, loadSubmodules, renderSubmoduleList, toggleSelectAllSubmodules, copyUnauthorizedSubmoduleUrls, copyNonAdminSubmoduleUrls };
+async function copySelectedSubmoduleUrls() {
+  if (!state.currentSubmodules || state.currentSubmodules.length === 0) {
+    setStatus('当前没有子模块');
+    return;
+  }
+  const selected = state.currentSubmodules.filter(function(s) {
+    return state.selectedRepos.has(s.full_name);
+  });
+  if (selected.length === 0) {
+    setStatus('请先选中子模块');
+    return;
+  }
+  const urls = selected.map(function(s) {
+    return s.html_url || ('https://gitee.com/' + s.full_name);
+  }).join('\n');
+  try {
+    await copyTextToClipboard(urls);
+    setStatus('已复制 ' + selected.length + ' 个子模块链接');
+  } catch (e) {
+    setStatus('复制失败: ' + e.message);
+  }
+}
+
+export { getSubmoduleRepos, loadSubmodules, renderSubmoduleList, toggleSelectAllSubmodules, copyUnauthorizedSubmoduleUrls, copyNonAdminSubmoduleUrls, copySelectedSubmoduleUrls };

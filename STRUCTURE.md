@@ -16,11 +16,12 @@ gitee-repo-permission/
     ├── api.js         # Token UI + Gitee API 封装
     ├── permissions.js # 权限计算 / Badge 渲染 / 降级预检
     ├── modal.js       # 通用降级决策模态框
+    ├── contextMenu.js # 通用右键上下文菜单（仓库 + 子模块）
     ├── userSearch.js  # 用户搜索 dropdown（自动补全）
     ├── tabs.js        # 桌面 / 移动端 tab 切换
-    ├── submodules.js  # 子模块解析与渲染
+    ├── submodules.js  # 子模块解析与渲染 + 复制链接
     ├── collabs.js     # 仓库详情 + 协作者 CRUD + 仓内批量
-    ├── repos.js       # 仓库加载 / 列表渲染 / 剪贴板导入
+    ├── repos.js       # 仓库加载 / 列表渲染 / 剪贴板导入 + 复制链接
     ├── batch.js       # 跨仓库批量授权 / 移除
     └── main.js        # 入口：init + 事件绑定 + window 暴露
 ```
@@ -49,6 +50,9 @@ graph TD
     permissions --> api
     permissions --> utils
 
+    contextMenu[contextMenu.js]
+    contextMenu --> utils
+
     userSearch --> state
     userSearch --> api
 
@@ -57,6 +61,7 @@ graph TD
     submodules --> utils
     submodules --> permissions
     submodules --> repos
+    submodules --> contextMenu
 
     collabs --> state
     collabs --> api
@@ -75,6 +80,7 @@ graph TD
     repos --> tabs
     repos --> collabs
     repos --> submodules
+    repos --> contextMenu
 
     batch --> state
     batch --> api
@@ -111,11 +117,12 @@ ESM 容忍，因为所有调用都发生在函数体内（运行时），不在�
 | **api.js** | `giteeApi`, `giteeApiFetchAll`, `getToken`, `rememberToken`, `clearTokenCache`, `toggleTokenVisibility` | 所有 Gitee REST 调用统一入口 |
 | **permissions.js** | `getRepoPermissionState`, `canSelectRepo`, `requestRepoPermission`, `createRepoPermissionBadgeWrap`, `getCurrentPermLevel`, `permLevelToLabel`, `fetchTargetUserPermLevel`, `precheckTargetUserPermissions`, `classifyDowngrades`, `repoMatchesFilter`, `getRepoApiPath`, `applyRepoPermissionData`, `findMainRepoByFullName`, `ensureRepoInMainList`, `shouldClearRepoSelection`, `getRepoSelectionDisabledTitle`, `shouldCopyRestrictedRepoUrl` | 权限读取、分类、降级预检 |
 | **modal.js** | `showDowngradeDecisionModal` | 通用 Promise 化模态框（`batch` 三按钮 / `single` 两按钮），无外部依赖 |
+| **contextMenu.js** | `showRepoContextMenu`, `showSubmoduleContextMenu`, `closeContextMenu` | 通用右键上下文菜单，支持边界检测和 ESC 关闭 |
 | **userSearch.js** | `setupUserSearch`, `doUserSearch`, `renderUserDropdown`, `closeUserDropdown` | 用户搜索 dropdown，带 `state._userSearchCache` 缓存 |
 | **tabs.js** | `switchTab`, `switchMobileTab` | tab 切换；纯 DOM |
-| **submodules.js** | `getSubmoduleRepos`, `loadSubmodules`, `renderSubmoduleList`, `toggleSelectAllSubmodules`, `copyUnauthorizedSubmoduleUrls`, `copyNonAdminSubmoduleUrls` | 解析 `.gitmodules` 并并发拉权限 |
+| **submodules.js** | `getSubmoduleRepos`, `loadSubmodules`, `renderSubmoduleList`, `toggleSelectAllSubmodules`, `copyUnauthorizedSubmoduleUrls`, `copyNonAdminSubmoduleUrls`, `copySelectedSubmoduleUrls` | 解析 `.gitmodules` 并并发拉权限、右键菜单、复制链接 |
 | **collabs.js** | `loadRepoDetail`, `renderCollabList`, `updateDetailPermBadges`, `updateCollabPermission`, `removeCollab`, `promptAddCollab`, `batchCollabUpdatePerm`, `batchCollabRemove`, `toggleSelectAllCollabs`, `updateCollabBatchBar` | 当前选中仓库的协作者管理 |
-| **repos.js** | `loadAllRepos`, `renderRepoList`, `toggleSelectAllVisible`, `selectAllVisible`, `deselectAll`, `setBatchLoading`, `getPermGroup`, `openClipboardSelectModal` | 仓库列表加载与渲染、剪贴板导入 |
+| **repos.js** | `loadAllRepos`, `renderRepoList`, `toggleSelectAllVisible`, `selectAllVisible`, `deselectAll`, `setBatchLoading`, `getPermGroup`, `openClipboardSelectModal`, `copySelectedRepoUrls` | 仓库列表加载与渲染、剪贴板导入、右键菜单、复制链接 |
 | **batch.js** | `batchAddCollab`, `batchRemoveCollab` | 侧栏跨仓库批量授权/移除，含降级预检流程 |
 | **main.js** | （无导出） | 启动 IIFE、四组事件监听、`Object.assign(window, ...)` 暴露 20 个函数 |
 
@@ -209,6 +216,7 @@ Object.assign(window, {
   toggleTokenVisibility, rememberToken, clearTokenCache,
   // repos.js
   loadAllRepos, toggleSelectAllVisible, openClipboardSelectModal,
+  copySelectedRepoUrls,
   // collabs.js
   promptAddCollab, toggleSelectAllCollabs,
   batchCollabUpdatePerm, batchCollabRemove,
@@ -216,6 +224,7 @@ Object.assign(window, {
   batchAddCollab, batchRemoveCollab,
   // submodules.js
   toggleSelectAllSubmodules, copyUnauthorizedSubmoduleUrls,
+  copyNonAdminSubmoduleUrls, copySelectedSubmoduleUrls,
   // tabs.js
   switchTab, switchMobileTab,
 });
@@ -291,6 +300,7 @@ GitHub Pages 直接服务静态文件，无需构建。
 | 加 / 改 Gitee API 调用 | `api.js` |
 | 新增权限相关计算 | `permissions.js` |
 | 加新模态框 | 在对应业务模块或独立 `modal*.js` |
+| 加新上下文菜单项 | `contextMenu.js` 的 `showContextMenu` 函数 |
 | 加新仓库列表过滤 | `permissions.js` 的 `repoMatchesFilter` + `repos.js` 的 `renderRepoList` |
 | 加新 HTML 元素带 onclick | 写实现 + 在 `main.js` 的 `Object.assign(window, ...)` 暴露 |
 | 加新共享状态 | `state.js` 加字段；其他模块用 `state.X` |

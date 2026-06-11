@@ -57,6 +57,7 @@ Object.assign(window, {
   loadAllRepos: repos.loadAllRepos,
   toggleSelectAllVisible: repos.toggleSelectAllVisible,
   openClipboardSelectModal: repos.openClipboardSelectModal,
+  copySelectedRepoUrls: repos.copySelectedRepoUrls,
   // collabs.js
   promptAddCollab: collabs.promptAddCollab,
   toggleSelectAllCollabs: collabs.toggleSelectAllCollabs,
@@ -69,6 +70,7 @@ Object.assign(window, {
   toggleSelectAllSubmodules: submodules.toggleSelectAllSubmodules,
   copyUnauthorizedSubmoduleUrls: submodules.copyUnauthorizedSubmoduleUrls,
   copyNonAdminSubmoduleUrls: submodules.copyNonAdminSubmoduleUrls,
+  copySelectedSubmoduleUrls: submodules.copySelectedSubmoduleUrls,
   // tabs.js
   switchTab: tabs.switchTab,
   switchMobileTab: tabs.switchMobileTab,
