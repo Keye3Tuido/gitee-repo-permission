@@ -3,7 +3,7 @@ import { giteeApi } from './api.js';
 import { extractRepoFullNamesFromText, hoverShow, hoverClear,
          copyTextToClipboard, setStatus } from './utils.js';
 import { getRepoApiPath, shouldClearRepoSelection, canSelectRepo,
-         createRepoPermissionBadgeWrap, shouldCopyRestrictedRepoUrl,
+         createRepoPermissionBadgeWrap,
          getRepoPermissionState } from './permissions.js';
 import { renderRepoList } from './repos.js';
 import { showSubmoduleContextMenu } from './contextMenu.js';
@@ -49,7 +49,6 @@ async function loadSubmodules(fullName) {
     state.currentSubmodulesRepo = fullName;
     renderSubmoduleList();
 
-    // fetch permission for each submodule
     // fetch permission for each submodule in parallel
     try {
       const promises = state.currentSubmodules.map(function(sub) {
@@ -170,73 +169,57 @@ function toggleSelectAllSubmodules() {
   renderRepoList();
 }
 
-async function copyUnauthorizedSubmoduleUrls() {
+async function copySubmoduleUrlsByFilter(filterFn, emptyMsg, successMsg) {
   if (!state.currentSubmodules || state.currentSubmodules.length === 0) {
     setStatus('当前没有可复制的子模块');
     return;
   }
-  const targets = state.currentSubmodules.filter(function(sub) {
-    return shouldCopyRestrictedRepoUrl(sub);
-  });
+  const targets = state.currentSubmodules.filter(filterFn);
   if (targets.length === 0) {
-    setStatus('当前子模块中没有无权限或请求失败的仓库');
+    setStatus(emptyMsg);
     return;
   }
-  const text = targets.map(function(sub) {
+  const urls = targets.map(function(sub) {
     return sub.html_url || ('https://gitee.com/' + sub.full_name);
-  }).join('\n');
-  try {
-    await copyTextToClipboard(text);
-    setStatus('已复制 ' + targets.length + ' 个无权限或请求失败的子模块链接');
-  } catch (e) {
-    setStatus('复制失败: ' + e.message);
-  }
-}
-
-async function copyNonAdminSubmoduleUrls() {
-  if (!state.currentSubmodules || state.currentSubmodules.length === 0) {
-    setStatus('当前没有可复制的子模块');
-    return;
-  }
-  const targets = state.currentSubmodules.filter(function(sub) {
-    return getRepoPermissionState(sub) !== 'admin';
-  });
-  if (targets.length === 0) {
-    setStatus('所有子模块均有管理权限');
-    return;
-  }
-  const text = targets.map(function(sub) {
-    return sub.html_url || ('https://gitee.com/' + sub.full_name);
-  }).join('\n');
-  try {
-    await copyTextToClipboard(text);
-    setStatus('已复制 ' + targets.length + ' 个无管理权限的子模块链接');
-  } catch (e) {
-    setStatus('复制失败: ' + e.message);
-  }
-}
-
-async function copySelectedSubmoduleUrls() {
-  if (!state.currentSubmodules || state.currentSubmodules.length === 0) {
-    setStatus('当前没有子模块');
-    return;
-  }
-  const selected = state.currentSubmodules.filter(function(s) {
-    return state.selectedRepos.has(s.full_name);
-  });
-  if (selected.length === 0) {
-    setStatus('请先选中子模块');
-    return;
-  }
-  const urls = selected.map(function(s) {
-    return s.html_url || ('https://gitee.com/' + s.full_name);
   }).join('\n');
   try {
     await copyTextToClipboard(urls);
-    setStatus('已复制 ' + selected.length + ' 个子模块链接');
+    setStatus(successMsg.replace('{count}', targets.length));
   } catch (e) {
     setStatus('复制失败: ' + e.message);
   }
 }
 
-export { getSubmoduleRepos, loadSubmodules, renderSubmoduleList, toggleSelectAllSubmodules, copyUnauthorizedSubmoduleUrls, copyNonAdminSubmoduleUrls, copySelectedSubmoduleUrls };
+async function copyUnauthorizedSubmoduleUrls() {
+  await copySubmoduleUrlsByFilter(
+    function(sub) { return getRepoPermissionState(sub) === 'unauthorized'; },
+    '当前子模块中没有无权限的仓库',
+    '已复制 {count} 个无权限的子模块链接'
+  );
+}
+
+async function copyNonAdminSubmoduleUrls() {
+  await copySubmoduleUrlsByFilter(
+    function(sub) { return getRepoPermissionState(sub) !== 'admin'; },
+    '所有子模块均有管理权限',
+    '已复制 {count} 个无管理权限的子模块链接'
+  );
+}
+
+async function copySelectedSubmoduleUrls() {
+  await copySubmoduleUrlsByFilter(
+    function(sub) { return state.selectedRepos.has(sub.full_name); },
+    '请先选中子模块',
+    '已复制 {count} 个子模块链接'
+  );
+}
+
+async function copyPullOnlySubmoduleUrls() {
+  await copySubmoduleUrlsByFilter(
+    function(sub) { return getRepoPermissionState(sub) === 'pull'; },
+    '当前子模块中没有只读权限的仓库',
+    '已复制 {count} 个只读权限的子模块链接'
+  );
+}
+
+export { getSubmoduleRepos, loadSubmodules, renderSubmoduleList, toggleSelectAllSubmodules, copyUnauthorizedSubmoduleUrls, copyNonAdminSubmoduleUrls, copySelectedSubmoduleUrls, copyPullOnlySubmoduleUrls };

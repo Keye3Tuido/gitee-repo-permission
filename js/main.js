@@ -71,7 +71,36 @@ Object.assign(window, {
   copyUnauthorizedSubmoduleUrls: submodules.copyUnauthorizedSubmoduleUrls,
   copyNonAdminSubmoduleUrls: submodules.copyNonAdminSubmoduleUrls,
   copySelectedSubmoduleUrls: submodules.copySelectedSubmoduleUrls,
+  copyPullOnlySubmoduleUrls: submodules.copyPullOnlySubmoduleUrls,
   // tabs.js
   switchTab: tabs.switchTab,
   switchMobileTab: tabs.switchMobileTab,
+  // dropdown menus
+  toggleSubmoduleMenu: toggleSubmoduleMenu,
+  closeSubmoduleMenu: closeSubmoduleMenu,
 });
+
+function toggleSubmoduleMenu(e) {
+  e.stopPropagation();
+  const menu = document.getElementById('submodule-dropdown');
+  if (menu.style.display === 'none') {
+    menu.style.display = 'block';
+    setTimeout(function() {
+      document.addEventListener('click', closeSubmoduleMenu);
+      document.addEventListener('keydown', onSubmoduleMenuEsc);
+    }, 0);
+  } else {
+    closeSubmoduleMenu();
+  }
+}
+
+function closeSubmoduleMenu() {
+  const menu = document.getElementById('submodule-dropdown');
+  if (menu) menu.style.display = 'none';
+  document.removeEventListener('click', closeSubmoduleMenu);
+  document.removeEventListener('keydown', onSubmoduleMenuEsc);
+}
+
+function onSubmoduleMenuEsc(e) {
+  if (e.key === 'Escape') closeSubmoduleMenu();
+}

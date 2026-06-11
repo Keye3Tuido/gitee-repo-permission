@@ -164,7 +164,7 @@ loadAllRepos (repos.js)
  ├─ Phase A：并发拉 /user/repos 和 /orgs/*/repos
  │           每发现一个仓库 → addRepo → mergeRepo → permQueue.push
  ├─ Phase B：5 并发权限池（requestRepoPermission）
- │           完成后 sortAndRender → renderRepoList
+ │           permDone % RENDER_INTERVAL → sortAndRender
  └─ retryPendingPermissionRepos：兜底重拉权限失败的仓库
 ```
 

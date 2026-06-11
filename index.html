@@ -145,12 +145,14 @@ body {
     <div class="sidebar" id="repos-panel">
       <div class="sidebar-header">
         <span>&#20179;&#24211;&#21015;&#34920; <span id="repo-count" style="color:var(--text3);font-weight:400"></span></span>
-        <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:.5rem">
           <label class="header-select-toggle">
             <input type="checkbox" id="repo-select-all" onchange="toggleSelectAllVisible()"> 全选
           </label>
-          <button class="btn btn-ghost btn-sm" onclick="copySelectedRepoUrls()" title="复制选中仓库链接">&#128203; 复制链接</button>
-          <button class="btn btn-ghost btn-sm" onclick="openClipboardSelectModal()" title="从剪贴板选中">&#128203; 从剪贴板选中</button>
+          <div class="btn-group">
+            <button class="btn btn-ghost btn-sm" onclick="copySelectedRepoUrls()" title="复制选中仓库链接">&#128203; 复制</button>
+            <button class="btn btn-ghost btn-sm" onclick="openClipboardSelectModal()" title="从剪贴板选中">&#128229; 导入</button>
+          </div>
         </div>
       </div>
       <div id="load-progress-wrap" style="display:none;padding:.3rem .75rem;border-bottom:1px solid var(--border)">
@@ -225,13 +227,19 @@ body {
               <div id="submodule-section" style="margin-top:1rem">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
                   <span style="font-weight:600;font-size:.9rem">子模块 <span id="submodule-count" style="color:var(--text3);font-weight:400;font-size:.8rem"></span></span>
-                  <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
-                    <button class="btn btn-ghost btn-sm" onclick="copySelectedSubmoduleUrls()" title="复制选中子模块链接">&#128203; 复制链接</button>
-                    <button class="btn btn-ghost btn-sm" onclick="copyUnauthorizedSubmoduleUrls()">复制无权限和请求失败的链接</button>
-                    <button class="btn btn-ghost btn-sm" onclick="copyNonAdminSubmoduleUrls()">复制无管理权限的仓库列表</button>
+                  <div style="display:flex;align-items:center;gap:.5rem;position:relative">
                     <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;margin:0">
                       <input type="checkbox" id="submodule-select-all" onchange="toggleSelectAllSubmodules()"> 全选
                     </label>
+                    <div class="btn-group">
+                      <button class="btn btn-ghost btn-sm" onclick="copySelectedSubmoduleUrls()" title="复制选中子模块链接">&#128203; 复制</button>
+                      <button class="btn btn-ghost btn-sm dropdown-toggle" onclick="toggleSubmoduleMenu(event)" title="更多操作">&#8942;</button>
+                    </div>
+                    <div id="submodule-dropdown" class="dropdown-menu" style="display:none">
+                      <div class="dropdown-item" onclick="copyUnauthorizedSubmoduleUrls();closeSubmoduleMenu()">复制无权限链接</div>
+                      <div class="dropdown-item" onclick="copyPullOnlySubmoduleUrls();closeSubmoduleMenu()">复制只读链接</div>
+                      <div class="dropdown-item" onclick="copyNonAdminSubmoduleUrls();closeSubmoduleMenu()">复制无管理权限的链接</div>
+                    </div>
                   </div>
                 </div>
                 <div id="submodule-list"></div>
@@ -387,6 +395,25 @@ body {
   font-size: .8rem; font-family: inherit; background: var(--card);
 }
 .collab-item-cb { flex-shrink: 0; cursor: pointer; }
+/* Button group */
+.btn-group { display: inline-flex; gap: 1px; }
+.btn-group .btn { border-radius: 0; }
+.btn-group .btn:first-child { border-radius: 6px 0 0 6px; }
+.btn-group .btn:last-child { border-radius: 0 6px 6px 0; }
+/* Dropdown menu */
+.dropdown-menu {
+  position: absolute; z-index: 50; background: var(--card);
+  border: 1px solid var(--border); border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.1); min-width: 180px;
+  top: 100%; right: 0; margin-top: 2px;
+}
+.dropdown-item {
+  padding: .5rem .75rem; cursor: pointer; font-size: .8rem;
+  color: var(--text); border-bottom: 1px solid var(--border);
+}
+.dropdown-item:last-child { border-bottom: none; }
+.dropdown-item:hover { background: var(--hover-bg); }
+.dropdown-toggle { padding-left: .4rem; padding-right: .4rem; }
 /* Context menu */
 .context-menu {
   position: fixed; z-index: 200; background: var(--card);

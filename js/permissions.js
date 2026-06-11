@@ -117,7 +117,7 @@ function createRepoPermissionBadgeWrap(repo) {
   const badgeWrap = document.createElement('div');
   badgeWrap.className = 'repo-perm-badges';
   const outsideCurrentList = !!(repo && repo.outsideCurrentList);
-  const state = getRepoPermissionState(repo);
+  const permState = getRepoPermissionState(repo);
 
   function appendOutsideCurrentListBadge() {
     if (!outsideCurrentList) return;
@@ -127,7 +127,7 @@ function createRepoPermissionBadgeWrap(repo) {
     badgeWrap.appendChild(span);
   }
 
-  if (state === 'loading') {
+  if (permState === 'loading') {
     const span = document.createElement('span');
     span.className = 'perm-badge perm-loading';
     span.textContent = '权限: 加载中';
@@ -135,7 +135,7 @@ function createRepoPermissionBadgeWrap(repo) {
     appendOutsideCurrentListBadge();
     return badgeWrap;
   }
-  if (state === 'failed') {
+  if (permState === 'failed') {
     const span = document.createElement('span');
     span.className = 'perm-badge perm-error';
     span.textContent = '权限请求失败';
@@ -143,7 +143,7 @@ function createRepoPermissionBadgeWrap(repo) {
     appendOutsideCurrentListBadge();
     return badgeWrap;
   }
-  if (state === 'unauthorized') {
+  if (permState === 'unauthorized') {
     const span = document.createElement('span');
     span.className = 'perm-badge perm-unauthorized';
     span.textContent = '无权限';

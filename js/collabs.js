@@ -156,7 +156,7 @@ function renderCollabList(filter) {
   var permissionState = getRepoPermissionState(repo);
   var permissionLoading = permissionState === 'loading';
   var permissionFailed = permissionState === 'failed';
-  var isAdmin = getRepoPermissionState(repo) === 'admin';
+  var isAdmin = permissionState === 'admin';
 
   if (state.currentCollabs.length === 0) {
     updateCollabBatchBar([], isAdmin);
@@ -503,6 +503,8 @@ async function removeCollab(repoFullName, username) {
   } catch (e) {
     setStatus('\u79fb\u9664\u5931\u8d25: ' + e.message);
     appendLog(repoFullName + ': \u79fb\u9664 ' + username + ' \u5931\u8d25 - ' + e.message, 'err');
+    switchTab('log');
+    loadRepoDetail(repoFullName);
   }
 }
 

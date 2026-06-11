@@ -3,14 +3,14 @@ import { giteeApi, giteeApiFetchAll, getToken } from './api.js';
 import { setStatus, appendLog, copyTextToClipboard } from './utils.js';
 import { repoMatchesFilter, getRepoPermissionState, canSelectRepo,
          shouldClearRepoSelection, getRepoSelectionDisabledTitle,
-         shouldCopyRestrictedRepoUrl, requestRepoPermission,
+         requestRepoPermission,
          createRepoPermissionBadgeWrap, findMainRepoByFullName,
          ensureRepoInMainList } from './permissions.js';
 import { extractRepoFullNamesFromText, hoverShow, hoverClear } from './utils.js';
 import { switchMobileTab } from './tabs.js';
+import { showRepoContextMenu } from './contextMenu.js';
 import { loadRepoDetail, updateDetailPermBadges } from './collabs.js';
 import { renderSubmoduleList } from './submodules.js';
-import { showRepoContextMenu } from './contextMenu.js';
 
 function setBatchLoading(loading) {
   var addBtn = document.querySelector('.batch-bar .btn-success');
@@ -80,6 +80,7 @@ async function loadAllRepos() {
   let permTotal = 0;
   let permDone = 0;
   const PERM_CONCURRENCY = 5;
+  const RENDER_INTERVAL = 10;
   let permAllResolve = null;
   let phaseAComplete = false;
 
@@ -120,10 +121,10 @@ async function loadAllRepos() {
         await requestRepoPermission(repo);
         permDone++;
         if (repo.full_name === state.currentRepo) updateDetailPermBadges(repo.full_name);
-        try { updateProgress(); } catch (e) { /* ignore render error */ }
+        try { updateProgress(); } catch (e) { console.warn('updateProgress error', e); }
         try {
-          if (permDone % 10 === 0 || permDone >= permTotal) sortAndRender();
-        } catch (e) { /* ignore render error */ }
+          if (permDone % RENDER_INTERVAL === 0 || permDone >= permTotal) sortAndRender();
+        } catch (e) { console.warn('sortAndRender error', e); }
         checkPermAllDone();
       }
     } finally {
@@ -319,13 +320,35 @@ function renderRepoList() {
     header.appendChild(toggleSpan);
     header.appendChild(badgeSpan);
     header.appendChild(countSpan);
-    (function(key) {
-      header.onclick = function() {
+    (function(key, repos) {
+      header.onclick = function(e) {
+        if (e.button !== 0) return;
         if (state.collapsedGroups.has(key)) state.collapsedGroups.delete(key);
         else state.collapsedGroups.add(key);
         renderRepoList();
       };
-    })(gm.key);
+      if (key !== 'loading' && key !== 'unauthorized' && key !== 'failed') {
+        var selectable = repos.filter(function(r) { return canSelectRepo(r); });
+        var selCount = selectable.filter(function(r) { return state.selectedRepos.has(r.full_name); }).length;
+        var selectCb = document.createElement('input');
+        selectCb.type = 'checkbox';
+        selectCb.style.cssText = 'margin-left:auto;cursor:pointer;accent-color:var(--primary);flex-shrink:0';
+        selectCb.checked = selectable.length > 0 && selCount === selectable.length;
+        selectCb.indeterminate = selCount > 0 && selCount < selectable.length;
+        selectCb.title = selCount + '/' + selectable.length + ' 已选';
+        selectCb.onclick = function(e) {
+          e.stopPropagation();
+          if (selectCb.checked) {
+            selectable.forEach(function(r) { state.selectedRepos.add(r.full_name); });
+          } else {
+            selectable.forEach(function(r) { state.selectedRepos.delete(r.full_name); });
+          }
+          renderRepoList();
+          renderSubmoduleList();
+        };
+        header.appendChild(selectCb);
+      }
+    })(gm.key, repos);
     container.appendChild(header);
 
     if (!state.collapsedGroups.has(gm.key)) {
@@ -495,11 +518,15 @@ function openClipboardSelectModal() {
   resultToolbar.className = 'clipboard-modal-toolbar';
   const copyUnauthorizedBtn = document.createElement('button');
   copyUnauthorizedBtn.className = 'btn btn-ghost btn-sm';
-  copyUnauthorizedBtn.textContent = '复制无权限或失败仓库链接';
+  copyUnauthorizedBtn.textContent = '复制无权限链接';
   resultToolbar.appendChild(copyUnauthorizedBtn);
+  const copyPullOnlyBtn = document.createElement('button');
+  copyPullOnlyBtn.className = 'btn btn-ghost btn-sm';
+  copyPullOnlyBtn.textContent = '复制只读链接';
+  resultToolbar.appendChild(copyPullOnlyBtn);
   const copyNonAdminBtn = document.createElement('button');
   copyNonAdminBtn.className = 'btn btn-ghost btn-sm';
-  copyNonAdminBtn.textContent = '复制无管理权限的仓库列表';
+  copyNonAdminBtn.textContent = '复制无管理权限链接';
   resultToolbar.appendChild(copyNonAdminBtn);
   modal.appendChild(resultToolbar);
 
@@ -641,12 +668,10 @@ function openClipboardSelectModal() {
     renderCandidates(parsedRepos);
   }
 
-  async function copyUnauthorizedRepoUrls() {
-    const repos = parsedRepos.filter(function(repo) {
-      return shouldCopyRestrictedRepoUrl(repo);
-    });
+  async function copyParsedRepoUrlsByFilter(filterFn, emptyMsg, successMsg) {
+    const repos = parsedRepos.filter(filterFn);
     if (repos.length === 0) {
-      setStatus('当前解析结果中没有可复制的无权限或请求失败仓库');
+      setStatus(emptyMsg);
       return;
     }
     const text = repos.map(function(repo) {
@@ -654,29 +679,34 @@ function openClipboardSelectModal() {
     }).join('\n');
     try {
       await copyTextToClipboard(text);
-      setStatus('已复制 ' + repos.length + ' 个无权限或请求失败仓库链接');
+      setStatus(successMsg.replace('{count}', repos.length));
     } catch (e) {
       setStatus('复制失败: ' + e.message);
     }
   }
 
+  async function copyUnauthorizedRepoUrls() {
+    await copyParsedRepoUrlsByFilter(
+      function(repo) { return getRepoPermissionState(repo) === 'unauthorized'; },
+      '当前解析结果中没有无权限的仓库',
+      '已复制 {count} 个无权限的仓库链接'
+    );
+  }
+
+  async function copyPullOnlyRepoUrls() {
+    await copyParsedRepoUrlsByFilter(
+      function(repo) { return getRepoPermissionState(repo) === 'pull'; },
+      '当前解析结果中没有只读权限的仓库',
+      '已复制 {count} 个只读权限的仓库链接'
+    );
+  }
+
   async function copyNonAdminRepoUrls() {
-    const repos = parsedRepos.filter(function(repo) {
-      return getRepoPermissionState(repo) !== 'admin';
-    });
-    if (repos.length === 0) {
-      setStatus('所有解析仓库均有管理权限');
-      return;
-    }
-    const text = repos.map(function(repo) {
-      return repo.html_url || ('https://gitee.com/' + repo.full_name);
-    }).join('\n');
-    try {
-      await copyTextToClipboard(text);
-      setStatus('已复制 ' + repos.length + ' 个无管理权限的仓库链接');
-    } catch (e) {
-      setStatus('复制失败: ' + e.message);
-    }
+    await copyParsedRepoUrlsByFilter(
+      function(repo) { return getRepoPermissionState(repo) !== 'admin'; },
+      '所有解析仓库均有管理权限',
+      '已复制 {count} 个无管理权限的仓库链接'
+    );
   }
 
   function refreshParsedRepoPermissions(repos, requestVersion) {
@@ -717,6 +747,7 @@ function openClipboardSelectModal() {
   }
 
   copyUnauthorizedBtn.onclick = function() { copyUnauthorizedRepoUrls(); };
+  copyPullOnlyBtn.onclick = function() { copyPullOnlyRepoUrls(); };
   copyNonAdminBtn.onclick = function() { copyNonAdminRepoUrls(); };
   selectAllInput.onchange = function() { toggleSelectAllParsedRepos(); };
   parseBtn.onclick = function() {
