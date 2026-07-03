@@ -11,6 +11,7 @@ import { setupUserSearch } from './userSearch.js';
 (function init() {
   var saved = localStorage.getItem('gitee_perm_token') || '';
   if (saved) document.getElementById('token-input').value = saved;
+  if (saved) repos.loadAllRepos();
   document.getElementById('batch-user').value = '';
 })();
 
