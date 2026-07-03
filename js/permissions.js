@@ -1,5 +1,5 @@
 import { state, PERM_LEVEL } from './state.js';
-import { giteeApi, giteeApiFetchAll } from './api.js';
+import { giteeApi, giteeApiFetchAll, isRetryableApiError } from './api.js';
 import { setStatus, appendLog } from './utils.js';
 
 function repoMatchesFilter(repo, filter) {
@@ -105,11 +105,11 @@ async function requestRepoPermission(repo, linkedRepos, options) {
     if (isError && !(options && options.silent)) {
       appendLog('获取权限失败: ' + repo.full_name + ' - API 未返回权限字段', 'err');
     }
-    return { ok: !isError, data: data };
+    return { ok: !isError, data: data, retryable: false };
   } catch (e) {
     for (let i = 0; i < targets.length; i++) applyRepoPermissionData(targets[i], null, true);
     if (!(options && options.silent)) appendLog('获取权限失败: ' + repo.full_name + ' - ' + e.message, 'err');
-    return { ok: false, error: e };
+    return { ok: false, error: e, retryable: isRetryableApiError(e) };
   }
 }
 

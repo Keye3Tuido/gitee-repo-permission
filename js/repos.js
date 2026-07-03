@@ -11,6 +11,7 @@ import { switchMobileTab } from './tabs.js';
 import { showRepoContextMenu } from './contextMenu.js';
 import { loadRepoDetail, updateDetailPermBadges } from './collabs.js';
 import { renderSubmoduleList } from './submodules.js';
+import { registerPermRetry, clearPermRetries } from './permRetry.js';
 
 function setBatchLoading(loading) {
   var addBtn = document.querySelector('.batch-bar .btn-success');
@@ -27,6 +28,7 @@ async function loadAllRepos() {
   setBatchLoading(true);
   setStatus('\u6b63\u5728\u52a0\u8f7d\u4ed3\u5e93\u5217\u8868\u2026');
   state.allRepos = []; state.selectedRepos.clear(); state.currentRepo = null;
+  clearPermRetries();
   state._userSearchCache = {};
   document.getElementById('detail-placeholder').style.display = '';
   document.getElementById('detail-content').style.display = 'none';
@@ -118,8 +120,28 @@ async function loadAllRepos() {
       while (permQueue.length > 0) {
         if (state._loadGeneration !== myGeneration) return;
         var repo = permQueue.shift();
-        await requestRepoPermission(repo);
+        var permResult = await requestRepoPermission(repo);
         permDone++;
+        if (permResult && !permResult.ok && permResult.retryable) {
+          (function(failedRepo) {
+            registerPermRetry('repo:' + failedRepo.full_name, {
+              label: failedRepo.full_name,
+              isValid: function() {
+                return state._loadGeneration === myGeneration && !!failedRepo.permissionError;
+              },
+              run: function() {
+                return requestRepoPermission(failedRepo, null, { silent: true }).then(function(res) {
+                  if (res && res.ok) {
+                    if (failedRepo.full_name === state.currentRepo) updateDetailPermBadges(failedRepo.full_name);
+                    renderRepoList();
+                    return 'ok';
+                  }
+                  return (res && res.retryable) ? 'retry' : 'stop';
+                });
+              }
+            });
+          })(repo);
+        }
         if (repo.full_name === state.currentRepo) updateDetailPermBadges(repo.full_name);
         try { updateProgress(); } catch (e) { console.warn('updateProgress error', e); }
         try {

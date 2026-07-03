@@ -32,14 +32,24 @@ async function giteeApi(method, path, body) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body || {});
   }
-  const r = await fetch(url.toString(), opts);
+  let r;
+  try {
+    r = await fetch(url.toString(), opts);
+  } catch (netErr) {
+    netErr.isNetworkError = true;
+    throw netErr;
+  }
   if (r.status === 204) return null;
   const clone = r.clone();
   const data = await r.json().catch(async function() {
     const body = await clone.text().catch(function() { return ''; });
     return { message: body ? body.slice(0, 200) : 'parse error' };
   });
-  if (!r.ok) throw new Error('API ' + r.status + ': ' + (data.message || r.statusText));
+  if (!r.ok) {
+    var apiErr = new Error('API ' + r.status + ': ' + (data.message || r.statusText));
+    apiErr.status = r.status;
+    throw apiErr;
+  }
   return data;
 }
 
@@ -56,4 +66,11 @@ async function giteeApiFetchAll(path) {
   return results;
 }
 
-export { toggleTokenVisibility, rememberToken, clearTokenCache, getToken, giteeApi, giteeApiFetchAll };
+function isRetryableApiError(err) {
+  if (!err) return false;
+  if (err.isNetworkError) return true;
+  var status = err.status;
+  if (status === 408 || status === 429) return true;
+  return typeof status === "number" && status >= 500;
+}
+export { toggleTokenVisibility, rememberToken, clearTokenCache, getToken, giteeApi, giteeApiFetchAll, isRetryableApiError };

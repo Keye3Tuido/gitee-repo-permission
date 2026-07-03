@@ -15,6 +15,7 @@ gitee-repo-permission/
     ├── utils.js       # 日志 / 状态栏 / 剪贴板 / 文本解析
     ├── api.js         # Token UI + Gitee API 封装
     ├── permissions.js # 权限计算 / Badge 渲染 / 降级预检
+    ├── permRetry.js   # 权限加载失败后的后台循环重试
     ├── modal.js       # 通用降级决策模态框
     ├── contextMenu.js # 通用右键上下文菜单（仓库 + 子模块）
     ├── userSearch.js  # 用户搜索 dropdown（自动补全）
@@ -35,6 +36,7 @@ graph TD
     api[api.js]
     tabs[tabs.js]
     permissions[permissions.js]
+    permRetry[permRetry.js]
     modal[modal.js]
     userSearch[userSearch.js]
     submodules[submodules.js]
@@ -49,6 +51,7 @@ graph TD
     permissions --> state
     permissions --> api
     permissions --> utils
+    permRetry --> utils
 
     contextMenu[contextMenu.js]
     contextMenu --> utils
@@ -62,6 +65,7 @@ graph TD
     submodules --> permissions
     submodules --> repos
     submodules --> contextMenu
+    submodules --> permRetry
 
     collabs --> state
     collabs --> api
@@ -81,6 +85,7 @@ graph TD
     repos --> collabs
     repos --> submodules
     repos --> contextMenu
+    repos --> permRetry
 
     batch --> state
     batch --> api
@@ -114,8 +119,9 @@ ESM 容忍，因为所有调用都发生在函数体内（运行时），不在�
 |---|---|---|
 | **state.js** | `state`, `PERM_LEVEL` | 全部模块共享同一 `state` 对象引用 |
 | **utils.js** | `setStatus`, `appendLog`, `clearLog`, `hoverShow/Clear`, `copyTextToClipboard`, `readTextFromClipboard`, `fallbackCopyText`, `extractRepoFullNamesFromText` | 纯工具，无外部依赖 |
-| **api.js** | `giteeApi`, `giteeApiFetchAll`, `getToken`, `rememberToken`, `clearTokenCache`, `toggleTokenVisibility` | 所有 Gitee REST 调用统一入口 |
+| **api.js** | `giteeApi`, `giteeApiFetchAll`, `getToken`, `rememberToken`, `clearTokenCache`, `toggleTokenVisibility`, `isRetryableApiError` | 所有 Gitee REST 调用统一入口；`isRetryableApiError` 判定失败是否为网络类（可重试） |
 | **permissions.js** | `getRepoPermissionState`, `canSelectRepo`, `requestRepoPermission`, `createRepoPermissionBadgeWrap`, `getCurrentPermLevel`, `permLevelToLabel`, `fetchTargetUserPermLevel`, `precheckTargetUserPermissions`, `classifyDowngrades`, `repoMatchesFilter`, `getRepoApiPath`, `applyRepoPermissionData`, `findMainRepoByFullName`, `ensureRepoInMainList`, `shouldClearRepoSelection`, `getRepoSelectionDisabledTitle`, `shouldCopyRestrictedRepoUrl` | 权限读取、分类、降级预检 |
+| **permRetry.js** | `registerPermRetry`, `unregisterPermRetry`, `clearPermRetries` | 权限加载失败后的后台定时重试：Map 存任务，每 4s 一轮，成功或失效即移除，队列空自动停表 |
 | **modal.js** | `showDowngradeDecisionModal` | 通用 Promise 化模态框（`batch` 三按钮 / `single` 两按钮），无外部依赖 |
 | **contextMenu.js** | `showRepoContextMenu`, `showSubmoduleContextMenu`, `closeContextMenu` | 通用右键上下文菜单，支持边界检测和 ESC 关闭 |
 | **userSearch.js** | `setupUserSearch`, `doUserSearch`, `renderUserDropdown`, `closeUserDropdown` | 用户搜索 dropdown，带 `state._userSearchCache` 缓存 |
@@ -165,7 +171,8 @@ loadAllRepos (repos.js)
  │           每发现一个仓库 → addRepo → mergeRepo → permQueue.push
  ├─ Phase B：5 并发权限池（requestRepoPermission）
  │           permDone % RENDER_INTERVAL → sortAndRender
- └─ retryPendingPermissionRepos：兜底重拉权限失败的仓库
+ ├─ retryPendingPermissionRepos：兜底重拉仍未完成(!permissionLoaded)的仓库
+ └─ 权限失败(permissionError) → registerPermRetry(permRetry.js)：后台每 4s 循环补拉直至成功
 ```
 
 ### 2. 批量授权（带降级保护）
@@ -204,6 +211,16 @@ openClipboardSelectModal (repos.js)
  ├─ 后台并发 requestRepoPermission 补权限
  └─ 用户勾选 → state.selectedRepos.add(...)
 ```
+
+## 权限加载失败的后台重试
+`permRetry.js` 提供全局定时重试服务，解决弱网下权限拉取失败、以及主库权限未就绪时打开子模块导致的子模块权限失败。
+- `registerPermRetry(id, task)`：登记待重试任务；`task` 含 `isValid()`、`run()`（返回 `ok` 成功即移除 / `retry` 保留下轮再试 / `stop` 放弃并移除；兼容旧的 true/false）、`label`。
+- `setInterval` 每 4s 轮询：`isValid()` 假则丢弃，`run()` 真则移除，其余下轮再试；队列清空自动 `clearInterval`，无定时器泄漏。
+- `ticking` 防止上一轮未完成时重入；`await run()` 后二次校验，处理等待期间被清空/失效的竞态。
+接入点：
+- 仓库列表：`repos.js` 的 `permWorker` 中 `requestRepoPermission` 返回网络类失败（`retryable`）才以 `repo:<full_name>` 登记；`isValid` 绑定 `_loadGeneration`，重新加载（`clearPermRetries`）即失效。
+- 子模块：`submodules.js` 中仅当 `isRetryableApiError` 判为网络类时，用 `registerSubmoduleRetry` 以 `sub:<repo>:<sub>` 登记；`isValid` 绑定 `currentRepo`/`currentSubmodulesRepo`/成员关系，切库即失效。
+- 重试范围：只重试网络类失败——fetch/网络失败（`giteeApi` 捕获并标记 `isNetworkError`）、408、429、5xx；永久性错误（401/403/404 等 4xx、200 但无 permission、以及缺 Token 等非网络错误）判为 `stop` 不再重试。分类见 `api.js` 的 `isRetryableApiError`。
 
 ## HTML ↔ JS 桥接
 

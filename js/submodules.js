@@ -1,5 +1,5 @@
 import { state } from './state.js';
-import { giteeApi } from './api.js';
+import { giteeApi, isRetryableApiError } from './api.js';
 import { extractRepoFullNamesFromText, hoverShow, hoverClear,
          copyTextToClipboard, setStatus } from './utils.js';
 import { getRepoApiPath, shouldClearRepoSelection, canSelectRepo,
@@ -7,6 +7,7 @@ import { getRepoApiPath, shouldClearRepoSelection, canSelectRepo,
          getRepoPermissionState } from './permissions.js';
 import { renderRepoList } from './repos.js';
 import { showSubmoduleContextMenu } from './contextMenu.js';
+import { registerPermRetry } from './permRetry.js';
 
 async function getSubmoduleRepos(fullName) {
   try {
@@ -71,6 +72,7 @@ async function loadSubmodules(fullName) {
           sub.permission = {};
           sub.permissionLoaded = true;
           sub.permissionError = true;
+          if (isRetryableApiError(res && res.err)) registerSubmoduleRetry(fullName, sub);
         }
       }
       renderSubmoduleList();
@@ -88,6 +90,30 @@ async function loadSubmodules(fullName) {
     wrap.innerHTML = '<div class="err-text">加载子模块失败</div>';
     if (countEl) countEl.textContent = '';
   }
+}
+
+function registerSubmoduleRetry(repoFullName, sub) {
+  registerPermRetry('sub:' + repoFullName + ':' + sub.full_name, {
+    label: sub.full_name,
+    isValid: function() {
+      return state.currentRepo === repoFullName
+        && state.currentSubmodulesRepo === repoFullName
+        && state.currentSubmodules.indexOf(sub) !== -1
+        && !!sub.permissionError;
+    },
+    run: function() {
+      return giteeApi('GET', getRepoApiPath(sub.full_name)).then(function(d) {
+        if (d && d.permission) {
+          sub.permission = d.permission;
+          sub.permissionLoaded = true;
+          sub.permissionError = false;
+          renderSubmoduleList();
+          return 'ok';
+        }
+        return 'stop';
+      }).catch(function(err) { return isRetryableApiError(err) ? 'retry' : 'stop'; });
+    }
+  });
 }
 
 function renderSubmoduleList() {
