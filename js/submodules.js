@@ -1,7 +1,7 @@
 import { state } from './state.js';
 import { giteeApi, isRetryableApiError } from './api.js';
 import { extractRepoFullNamesFromText, hoverShow, hoverClear,
-         copyTextToClipboard, setStatus } from './utils.js';
+         copyTextToClipboard, setStatus, repoUrl } from './utils.js';
 import { getRepoApiPath, shouldClearRepoSelection, canSelectRepo,
          createRepoPermissionBadgeWrap,
          getRepoPermissionState } from './permissions.js';
@@ -205,9 +205,7 @@ async function copySubmoduleUrlsByFilter(filterFn, emptyMsg, successMsg) {
     setStatus(emptyMsg);
     return;
   }
-  const urls = targets.map(function(sub) {
-    return sub.html_url || ('https://gitee.com/' + sub.full_name);
-  }).join('\n');
+  const urls = targets.map(repoUrl).join('\n');
   try {
     await copyTextToClipboard(urls);
     setStatus(successMsg.replace('{count}', targets.length));

@@ -1,6 +1,6 @@
 import { state, PERM_LEVEL } from './state.js';
 import { giteeApi, giteeApiFetchAll, isRetryableApiError } from './api.js';
-import { setStatus, appendLog } from './utils.js';
+import { setStatus, appendLog, repoUrl } from './utils.js';
 
 function repoMatchesFilter(repo, filter) {
   const keyword = (filter || '').trim().toLowerCase();
@@ -35,11 +35,6 @@ function getRepoSelectionDisabledTitle(repo) {
   if (state === 'failed') return '权限请求失败，无法选中';
   if (state === 'unauthorized') return '无权限，无法选中';
   return '';
-}
-
-function shouldCopyRestrictedRepoUrl(repo) {
-  const state = getRepoPermissionState(repo);
-  return state === 'unauthorized' || state === 'failed';
 }
 
 function getRepoApiPath(fullName) {
@@ -86,7 +81,7 @@ function ensureRepoInMainList(repo) {
     permission: repo.permission || {},
     permissionLoaded: !!repo.permissionLoaded,
     permissionError: !!repo.permissionError,
-    html_url: repo.html_url || ('https://gitee.com/' + repo.full_name),
+    html_url: repoUrl(repo),
     description: '',
     isPrivate: !!repo.isPrivate,
   };
@@ -107,6 +102,19 @@ async function requestRepoPermission(repo, linkedRepos, options) {
     }
     return { ok: !isError, data: data, retryable: false };
   } catch (e) {
+    var status = e && e.status;
+    var accessDenied = status === 403 || status === 404;
+    if (accessDenied) {
+      // 403/404 表示无访问权限，而非请求失败：归类为“无权限”，且不重试
+      for (let i = 0; i < targets.length; i++) {
+        targets[i].permission = {};
+        targets[i].permissionLoaded = true;
+        targets[i].permissionError = false;
+      }
+      if (!(options && options.silent)) appendLog('无权限访问: ' + repo.full_name + ' (HTTP ' + status + ')', 'info');
+      // ok:false —— 状态已确定为“无权限”，但返回 false 以避免被剪贴板流程注入主列表；retryable:false 已阻止重试
+      return { ok: false, unauthorized: true, retryable: false };
+    }
     for (let i = 0; i < targets.length; i++) applyRepoPermissionData(targets[i], null, true);
     if (!(options && options.silent)) appendLog('获取权限失败: ' + repo.full_name + ' - ' + e.message, 'err');
     return { ok: false, error: e, retryable: isRetryableApiError(e) };
@@ -269,4 +277,4 @@ function classifyDowngrades(repos, levelMap, targetLevel) {
 //   failed:     [{ title }],
 //   safeCount,
 
-export { repoMatchesFilter, getRepoPermissionState, canSelectRepo, shouldClearRepoSelection, getRepoSelectionDisabledTitle, shouldCopyRestrictedRepoUrl, getRepoApiPath, applyRepoPermissionData, findMainRepoByFullName, ensureRepoInMainList, requestRepoPermission, createRepoPermissionBadgeWrap, getCurrentPermLevel, permLevelToLabel, fetchTargetUserPermLevel, precheckTargetUserPermissions, classifyDowngrades };
+export { repoMatchesFilter, getRepoPermissionState, canSelectRepo, shouldClearRepoSelection, getRepoSelectionDisabledTitle, getRepoApiPath, applyRepoPermissionData, findMainRepoByFullName, ensureRepoInMainList, requestRepoPermission, createRepoPermissionBadgeWrap, getCurrentPermLevel, permLevelToLabel, fetchTargetUserPermLevel, precheckTargetUserPermissions, classifyDowngrades };

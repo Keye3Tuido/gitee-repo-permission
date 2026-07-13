@@ -118,9 +118,9 @@ ESM 容忍，因为所有调用都发生在函数体内（运行时），不在�
 | 模块 | 主要导出 | 说明 |
 |---|---|---|
 | **state.js** | `state`, `PERM_LEVEL` | 全部模块共享同一 `state` 对象引用 |
-| **utils.js** | `setStatus`, `appendLog`, `clearLog`, `hoverShow/Clear`, `copyTextToClipboard`, `readTextFromClipboard`, `fallbackCopyText`, `extractRepoFullNamesFromText` | 纯工具，无外部依赖 |
+| **utils.js** | `setStatus`, `appendLog`, `clearLog`, `hoverShow/Clear`, `copyTextToClipboard`, `readTextFromClipboard`, `fallbackCopyText`, `extractRepoFullNamesFromText`, `repoUrl` | 纯工具，无外部依赖；`repoUrl` 统一"取 html_url，缺失则回退 https://gitee.com/full_name" |
 | **api.js** | `giteeApi`, `giteeApiFetchAll`, `getToken`, `rememberToken`, `clearTokenCache`, `toggleTokenVisibility`, `isRetryableApiError` | 所有 Gitee REST 调用统一入口；`isRetryableApiError` 判定失败是否为网络类（可重试） |
-| **permissions.js** | `getRepoPermissionState`, `canSelectRepo`, `requestRepoPermission`, `createRepoPermissionBadgeWrap`, `getCurrentPermLevel`, `permLevelToLabel`, `fetchTargetUserPermLevel`, `precheckTargetUserPermissions`, `classifyDowngrades`, `repoMatchesFilter`, `getRepoApiPath`, `applyRepoPermissionData`, `findMainRepoByFullName`, `ensureRepoInMainList`, `shouldClearRepoSelection`, `getRepoSelectionDisabledTitle`, `shouldCopyRestrictedRepoUrl` | 权限读取、分类、降级预检 |
+| **permissions.js** | `getRepoPermissionState`, `canSelectRepo`, `requestRepoPermission`, `createRepoPermissionBadgeWrap`, `getCurrentPermLevel`, `permLevelToLabel`, `fetchTargetUserPermLevel`, `precheckTargetUserPermissions`, `classifyDowngrades`, `repoMatchesFilter`, `getRepoApiPath`, `applyRepoPermissionData`, `findMainRepoByFullName`, `ensureRepoInMainList`, `shouldClearRepoSelection`, `getRepoSelectionDisabledTitle` | 权限读取、分类、降级预检 |
 | **permRetry.js** | `registerPermRetry`, `unregisterPermRetry`, `clearPermRetries` | 权限加载失败后的后台定时重试：Map 存任务，每 4s 一轮，成功或失效即移除，队列空自动停表 |
 | **modal.js** | `showDowngradeDecisionModal` | 通用 Promise 化模态框（`batch` 三按钮 / `single` 两按钮），无外部依赖 |
 | **contextMenu.js** | `showRepoContextMenu`, `showSubmoduleContextMenu`, `closeContextMenu` | 通用右键上下文菜单，支持边界检测和 ESC 关闭 |
@@ -220,7 +220,9 @@ openClipboardSelectModal (repos.js)
 接入点：
 - 仓库列表：`repos.js` 的 `permWorker` 中 `requestRepoPermission` 返回网络类失败（`retryable`）才以 `repo:<full_name>` 登记；`isValid` 绑定 `_loadGeneration`，重新加载（`clearPermRetries`）即失效。
 - 子模块：`submodules.js` 中仅当 `isRetryableApiError` 判为网络类时，用 `registerSubmoduleRetry` 以 `sub:<repo>:<sub>` 登记；`isValid` 绑定 `currentRepo`/`currentSubmodulesRepo`/成员关系，切库即失效。
-- 重试范围：只重试网络类失败——fetch/网络失败（`giteeApi` 捕获并标记 `isNetworkError`）、408、429、5xx；永久性错误（401/403/404 等 4xx、200 但无 permission、以及缺 Token 等非网络错误）判为 `stop` 不再重试。分类见 `api.js` 的 `isRetryableApiError`。
+- 重试范围：只重试网络类失败——fetch/网络失败（`giteeApi` 捕获并标记 `isNetworkError`）、408、429、5xx；永久性错误（401、200 但无 permission、缺 Token 等非网络错误）判为 `stop` 不再重试。分类见 `api.js` 的 `isRetryableApiError`。
+- 权限状态归类（`requestRepoPermission`）：**403/404 视为"无访问权限"** → 置 `permission={}, permissionError=false`，落入「无权限(unauthorized)」组，不重试（Gitee 对无权/隐藏/不存在的库统一返回 404 `Not Found Project`，实证确认）。其余抛错（401/网络/5xx 等）→ `permissionError=true` 落「权限请求失败(failed)」组，网络类可后台重试。
+- 复制链接：`repos.js` 的 `renderRepoList` 在「权限请求失败」与「无权限」两组的分组标题右侧各注入一个「复制链接」按钮，复制本组（受当前搜索过滤）全部仓库链接。
 
 ## HTML ↔ JS 桥接
 

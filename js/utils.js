@@ -37,6 +37,12 @@ function extractRepoFullNamesFromText(text) {
   return Array.from(new Set(repos));
 }
 
+function repoUrl(item) {
+  if (item && item.html_url) return item.html_url;
+  var fullName = item && item.full_name ? item.full_name : '';
+  return 'https://gitee.com/' + fullName;
+}
+
 function fallbackCopyText(text) {
   return new Promise(function(resolve, reject) {
     try {
@@ -75,4 +81,4 @@ function readTextFromClipboard() {
   return Promise.reject(new Error('当前环境不支持直接读取剪贴板'));
 }
 
-export { setStatus, hoverShow, hoverClear, appendLog, clearLog, extractRepoFullNamesFromText, fallbackCopyText, copyTextToClipboard, readTextFromClipboard };
+export { setStatus, hoverShow, hoverClear, appendLog, clearLog, extractRepoFullNamesFromText, repoUrl, fallbackCopyText, copyTextToClipboard, readTextFromClipboard };

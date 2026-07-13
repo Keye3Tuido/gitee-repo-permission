@@ -1,4 +1,4 @@
-import { copyTextToClipboard, setStatus } from './utils.js';
+import { copyTextToClipboard, setStatus, repoUrl } from './utils.js';
 
 let activeMenuId = null;
 
@@ -70,8 +70,7 @@ function showRepoContextMenu(repo, x, y) {
     item: repo,
     label: '📋 复制仓库链接',
     onCopy: async function(repo) {
-      const url = repo.html_url || ('https://gitee.com/' + repo.full_name);
-      await copyTextToClipboard(url);
+      await copyTextToClipboard(repoUrl(repo));
       setStatus('已复制: ' + repo.full_name);
     }
   });
@@ -85,8 +84,7 @@ function showSubmoduleContextMenu(submodule, x, y) {
     item: submodule,
     label: '📋 复制子模块链接',
     onCopy: async function(submodule) {
-      const url = submodule.html_url || ('https://gitee.com/' + submodule.full_name);
-      await copyTextToClipboard(url);
+      await copyTextToClipboard(repoUrl(submodule));
       setStatus('已复制: ' + submodule.full_name);
     }
   });

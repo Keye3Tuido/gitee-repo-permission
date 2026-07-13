@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import { giteeApi, giteeApiFetchAll, getToken } from './api.js';
-import { setStatus, appendLog, copyTextToClipboard } from './utils.js';
+import { setStatus, appendLog, copyTextToClipboard, repoUrl } from './utils.js';
 import { repoMatchesFilter, getRepoPermissionState, canSelectRepo,
          shouldClearRepoSelection, getRepoSelectionDisabledTitle,
          requestRepoPermission,
@@ -370,6 +370,25 @@ function renderRepoList() {
         };
         header.appendChild(selectCb);
       }
+      if (key === 'failed' || key === 'unauthorized') {
+        var copyGroupBtn = document.createElement('button');
+        copyGroupBtn.className = 'btn btn-ghost btn-sm';
+        copyGroupBtn.textContent = '📋 复制链接';
+        copyGroupBtn.style.marginLeft = 'auto';
+        copyGroupBtn.title = '复制本组全部仓库链接';
+        (function(groupRepos, groupLabel) {
+          copyGroupBtn.onclick = function(e) {
+            e.stopPropagation();
+            var text = groupRepos.map(repoUrl).join('\n');
+            copyTextToClipboard(text).then(function() {
+              setStatus('已复制 ' + groupRepos.length + ' 个「' + groupLabel + '」仓库链接');
+            }).catch(function(err) {
+              setStatus('复制失败: ' + err.message);
+            });
+          };
+        })(repos, gm.label);
+        header.appendChild(copyGroupBtn);
+      }
     })(gm.key, repos);
     container.appendChild(header);
 
@@ -593,7 +612,7 @@ function openClipboardSelectModal() {
     return {
       full_name: fullName,
       name: (base && base.name) || fullName.split('/').slice(-1)[0],
-      html_url: (base && base.html_url) || ('https://gitee.com/' + fullName),
+      html_url: repoUrl(base || { full_name: fullName }),
       permission: base && base.permission ? Object.assign({}, base.permission) : {},
       permissionLoaded: !!(base && base.permissionLoaded),
       permissionError: !!(base && base.permissionError),
@@ -656,7 +675,7 @@ function openClipboardSelectModal() {
       name.textContent = repo.full_name;
       const url = document.createElement('div');
       url.className = 'clipboard-repo-url';
-      url.textContent = repo.html_url || ('https://gitee.com/' + repo.full_name);
+      url.textContent = repoUrl(repo);
       main.appendChild(name);
       main.appendChild(url);
 
@@ -696,9 +715,7 @@ function openClipboardSelectModal() {
       setStatus(emptyMsg);
       return;
     }
-    const text = repos.map(function(repo) {
-      return repo.html_url || ('https://gitee.com/' + repo.full_name);
-    }).join('\n');
+    const text = repos.map(repoUrl).join('\n');
     try {
       await copyTextToClipboard(text);
       setStatus(successMsg.replace('{count}', repos.length));
@@ -791,7 +808,7 @@ async function copySelectedRepoUrls() {
   }
   const urls = selected.map(function(fullName) {
     const repo = state.allRepos.find(function(r) { return r.full_name === fullName; });
-    return repo && repo.html_url ? repo.html_url : ('https://gitee.com/' + fullName);
+    return repoUrl(repo || { full_name: fullName });
   }).join('\n');
   try {
     await copyTextToClipboard(urls);
