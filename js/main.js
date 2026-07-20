@@ -73,6 +73,7 @@ Object.assign(window, {
   copyNonAdminSubmoduleUrls: submodules.copyNonAdminSubmoduleUrls,
   copySelectedSubmoduleUrls: submodules.copySelectedSubmoduleUrls,
   copyPullOnlySubmoduleUrls: submodules.copyPullOnlySubmoduleUrls,
+  copyFailedSubmoduleUrls: submodules.copyFailedSubmoduleUrls,
   // tabs.js
   switchTab: tabs.switchTab,
   switchMobileTab: tabs.switchMobileTab,

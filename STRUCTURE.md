@@ -126,11 +126,11 @@ ESM 容忍，因为所有调用都发生在函数体内（运行时），不在�
 | **contextMenu.js** | `showRepoContextMenu`, `showSubmoduleContextMenu`, `closeContextMenu` | 通用右键上下文菜单，支持边界检测和 ESC 关闭 |
 | **userSearch.js** | `setupUserSearch`, `doUserSearch`, `renderUserDropdown`, `closeUserDropdown` | 用户搜索 dropdown，带 `state._userSearchCache` 缓存 |
 | **tabs.js** | `switchTab`, `switchMobileTab` | tab 切换；纯 DOM |
-| **submodules.js** | `getSubmoduleRepos`, `loadSubmodules`, `renderSubmoduleList`, `toggleSelectAllSubmodules`, `copyUnauthorizedSubmoduleUrls`, `copyNonAdminSubmoduleUrls`, `copySelectedSubmoduleUrls` | 解析 `.gitmodules` 并并发拉权限、右键菜单、复制链接 |
+| **submodules.js** | `getSubmoduleRepos`, `loadSubmodules`, `renderSubmoduleList`, `toggleSelectAllSubmodules`, `copyUnauthorizedSubmoduleUrls`, `copyNonAdminSubmoduleUrls`, `copySelectedSubmoduleUrls`, `copyPullOnlySubmoduleUrls`, `copyFailedSubmoduleUrls` | 解析 `.gitmodules` 并并发拉权限、右键菜单、按权限状态复制链接（无权限 / 权限请求失败 / 只读 / 无管理权限 / 选中）|
 | **collabs.js** | `loadRepoDetail`, `renderCollabList`, `updateDetailPermBadges`, `updateCollabPermission`, `removeCollab`, `promptAddCollab`, `batchCollabUpdatePerm`, `batchCollabRemove`, `toggleSelectAllCollabs`, `updateCollabBatchBar` | 当前选中仓库的协作者管理 |
 | **repos.js** | `loadAllRepos`, `renderRepoList`, `toggleSelectAllVisible`, `selectAllVisible`, `deselectAll`, `setBatchLoading`, `getPermGroup`, `openClipboardSelectModal`, `copySelectedRepoUrls` | 仓库列表加载与渲染、剪贴板导入、右键菜单、复制链接 |
 | **batch.js** | `batchAddCollab`, `batchRemoveCollab` | 侧栏跨仓库批量授权/移除，含降级预检流程 |
-| **main.js** | （无导出） | 启动 IIFE、四组事件监听、`Object.assign(window, ...)` 暴露 20 个函数 |
+| **main.js** | （无导出） | 启动 IIFE、四组事件监听、`Object.assign(window, ...)` 暴露 23 个函数 |
 
 ## 共享状态模型
 
@@ -219,14 +219,16 @@ openClipboardSelectModal (repos.js)
 - `ticking` 防止上一轮未完成时重入；`await run()` 后二次校验，处理等待期间被清空/失效的竞态。
 接入点：
 - 仓库列表：`repos.js` 的 `permWorker` 中 `requestRepoPermission` 返回网络类失败（`retryable`）才以 `repo:<full_name>` 登记；`isValid` 绑定 `_loadGeneration`，重新加载（`clearPermRetries`）即失效。
-- 子模块：`submodules.js` 中仅当 `isRetryableApiError` 判为网络类时，用 `registerSubmoduleRetry` 以 `sub:<repo>:<sub>` 登记；`isValid` 绑定 `currentRepo`/`currentSubmodulesRepo`/成员关系，切库即失效。
+- 子模块：`submodules.js` 的 `loadSubmodules` 与主流程同规则——403/404 判为「无权限」（`permissionError=false`，不重试）；仅当 `isRetryableApiError` 判为网络类时才用 `registerSubmoduleRetry` 以 `sub:<repo>:<sub>` 登记；`isValid` 绑定 `currentRepo`/`currentSubmodulesRepo`/成员关系，切库即失效。
 - 重试范围：只重试网络类失败——fetch/网络失败（`giteeApi` 捕获并标记 `isNetworkError`）、408、429、5xx；永久性错误（401、200 但无 permission、缺 Token 等非网络错误）判为 `stop` 不再重试。分类见 `api.js` 的 `isRetryableApiError`。
-- 权限状态归类（`requestRepoPermission`）：**403/404 视为"无访问权限"** → 置 `permission={}, permissionError=false`，落入「无权限(unauthorized)」组，不重试（Gitee 对无权/隐藏/不存在的库统一返回 404 `Not Found Project`，实证确认）。其余抛错（401/网络/5xx 等）→ `permissionError=true` 落「权限请求失败(failed)」组，网络类可后台重试。
-- 复制链接：`repos.js` 的 `renderRepoList` 在「权限请求失败」与「无权限」两组的分组标题右侧各注入一个「复制链接」按钮，复制本组（受当前搜索过滤）全部仓库链接。
+- 权限状态归类（`requestRepoPermission` 与 `loadSubmodules` 一致）：**403/404 视为"无访问权限"** → 置 `permission={}, permissionError=false`，落入「无权限(unauthorized)」组，不重试（Gitee 对无权/隐藏/不存在的库统一返回 404 `Not Found Project`，实证确认；未加入相应团队的子模块即走此路）。其余抛错（401/网络/5xx 等）→ `permissionError=true` 落「权限请求失败(failed)」组，网络类可后台重试。
+- 复制链接：
+  - `repos.js` 的 `renderRepoList` 在「权限请求失败」与「无权限」两组的分组标题右侧各注入一个「复制链接」按钮，复制本组（受当前搜索过滤）全部仓库链接。
+  - 子模块面板 ⋮ 菜单按权限状态复制：无权限（`copyUnauthorizedSubmoduleUrls`）/ 权限请求失败（`copyFailedSubmoduleUrls`）/ 只读（`copyPullOnlySubmoduleUrls`）/ 无管理权限（`copyNonAdminSubmoduleUrls`），以及复制选中（`copySelectedSubmoduleUrls`）。
 
 ## HTML ↔ JS 桥接
 
-`index.html` 内联了 20 个 `onclick="xxx()"` / `onchange="xxx()"` 引用。
+`index.html` 内联了 25 个 `onclick="xxx()"` / `onchange="xxx()"` 引用。
 ES Module 默认作用域隔离，需要 `main.js` 末尾显式挂到 `window`：
 
 ```js

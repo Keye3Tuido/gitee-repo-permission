@@ -69,10 +69,17 @@ async function loadSubmodules(fullName) {
           sub.permissionLoaded = true;
           sub.permissionError = false;
         } else {
+          var subErr = res && res.err;
+          var subStatus = subErr && subErr.status;
           sub.permission = {};
           sub.permissionLoaded = true;
-          sub.permissionError = true;
-          if (isRetryableApiError(res && res.err)) registerSubmoduleRetry(fullName, sub);
+          if (subStatus === 403 || subStatus === 404) {
+            // 403/404 = 无访问权限（如未加入相应团队）→ 归“无权限”，而非请求失败，不重试
+            sub.permissionError = false;
+          } else {
+            sub.permissionError = true;
+            if (isRetryableApiError(subErr)) registerSubmoduleRetry(fullName, sub);
+          }
         }
       }
       renderSubmoduleList();
@@ -246,4 +253,12 @@ async function copyPullOnlySubmoduleUrls() {
   );
 }
 
-export { getSubmoduleRepos, loadSubmodules, renderSubmoduleList, toggleSelectAllSubmodules, copyUnauthorizedSubmoduleUrls, copyNonAdminSubmoduleUrls, copySelectedSubmoduleUrls, copyPullOnlySubmoduleUrls };
+async function copyFailedSubmoduleUrls() {
+  await copySubmoduleUrlsByFilter(
+    function(sub) { return getRepoPermissionState(sub) === 'failed'; },
+    '当前子模块中没有权限请求失败的仓库',
+    '已复制 {count} 个权限请求失败的子模块链接'
+  );
+}
+
+export { getSubmoduleRepos, loadSubmodules, renderSubmoduleList, toggleSelectAllSubmodules, copyUnauthorizedSubmoduleUrls, copyNonAdminSubmoduleUrls, copySelectedSubmoduleUrls, copyPullOnlySubmoduleUrls, copyFailedSubmoduleUrls };
