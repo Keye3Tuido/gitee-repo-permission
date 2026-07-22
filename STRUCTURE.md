@@ -20,7 +20,7 @@ gitee-repo-permission/
     ├── contextMenu.js # 通用右键上下文菜单（仓库 + 子模块）
     ├── userSearch.js  # 用户搜索 dropdown（自动补全）
     ├── tabs.js        # 桌面 / 移动端 tab 切换
-    ├── submodules.js  # 子模块解析与渲染 + 复制链接
+    ├── submodules.js  # 子模块解析与渲染 + 分支选择 + 复制链接
     ├── collabs.js     # 仓库详情 + 协作者 CRUD + 仓内批量
     ├── repos.js       # 仓库加载 / 列表渲染 / 剪贴板导入 + 复制链接
     ├── batch.js       # 跨仓库批量授权 / 移除
@@ -126,11 +126,11 @@ ESM 容忍，因为所有调用都发生在函数体内（运行时），不在�
 | **contextMenu.js** | `showRepoContextMenu`, `showSubmoduleContextMenu`, `closeContextMenu` | 通用右键上下文菜单，支持边界检测和 ESC 关闭 |
 | **userSearch.js** | `setupUserSearch`, `doUserSearch`, `renderUserDropdown`, `closeUserDropdown` | 用户搜索 dropdown，带 `state._userSearchCache` 缓存 |
 | **tabs.js** | `switchTab`, `switchMobileTab` | tab 切换；纯 DOM |
-| **submodules.js** | `getSubmoduleRepos`, `loadSubmodules`, `renderSubmoduleList`, `toggleSelectAllSubmodules`, `copyUnauthorizedSubmoduleUrls`, `copyNonAdminSubmoduleUrls`, `copySelectedSubmoduleUrls`, `copyPullOnlySubmoduleUrls`, `copyFailedSubmoduleUrls` | 解析 `.gitmodules` 并并发拉权限、右键菜单、按权限状态复制链接（无权限 / 权限请求失败 / 只读 / 无管理权限 / 选中）|
+| **submodules.js** | `getSubmoduleRepos`, `loadSubmodules`, `loadSubmodulesForRef`, `loadRepoBranches`, `renderSubmoduleList`, `toggleSelectAllSubmodules`, `copyUnauthorizedSubmoduleUrls`, `copyNonAdminSubmoduleUrls`, `copySelectedSubmoduleUrls`, `copyPullOnlySubmoduleUrls`, `copyFailedSubmoduleUrls`, `toggleBranchMenu`, `closeBranchMenu`, `filterBranchList` | 按分支解析 `.gitmodules` 并并发拉权限、右键菜单、按权限状态复制链接（无权限 / 权限请求失败 / 只读 / 无管理权限 / 选中）；分支选择器（带搜索）切换后按 `ref` 重载 |
 | **collabs.js** | `loadRepoDetail`, `renderCollabList`, `updateDetailPermBadges`, `updateCollabPermission`, `removeCollab`, `promptAddCollab`, `batchCollabUpdatePerm`, `batchCollabRemove`, `toggleSelectAllCollabs`, `updateCollabBatchBar` | 当前选中仓库的协作者管理 |
 | **repos.js** | `loadAllRepos`, `renderRepoList`, `toggleSelectAllVisible`, `selectAllVisible`, `deselectAll`, `setBatchLoading`, `getPermGroup`, `openClipboardSelectModal`, `copySelectedRepoUrls` | 仓库列表加载与渲染、剪贴板导入、右键菜单、复制链接 |
 | **batch.js** | `batchAddCollab`, `batchRemoveCollab` | 侧栏跨仓库批量授权/移除，含降级预检流程 |
-| **main.js** | （无导出） | 启动 IIFE、四组事件监听、`Object.assign(window, ...)` 暴露 23 个函数 |
+| **main.js** | （无导出） | 启动 IIFE、四组事件监听、`Object.assign(window, ...)` 暴露 26 个函数 |
 
 ## 共享状态模型
 
@@ -225,10 +225,11 @@ openClipboardSelectModal (repos.js)
 - 复制链接：
   - `repos.js` 的 `renderRepoList` 在「权限请求失败」与「无权限」两组的分组标题右侧各注入一个「复制链接」按钮，复制本组（受当前搜索过滤）全部仓库链接。
   - 子模块面板 ⋮ 菜单按权限状态复制：无权限（`copyUnauthorizedSubmoduleUrls`）/ 权限请求失败（`copyFailedSubmoduleUrls`）/ 只读（`copyPullOnlySubmoduleUrls`）/ 无管理权限（`copyNonAdminSubmoduleUrls`），以及复制选中（`copySelectedSubmoduleUrls`）。
+- 子模块分支选择器：打开仓库时 `loadSubmodules` 先经 `loadRepoBranches`（`GET /repos/{full}/branches` + `/repos/{full}` 的 `default_branch`）取分支列表与默认分支，标题旁按钮展开"带搜索框的下拉窗口"（`toggleBranchMenu`/`filterBranchList`）；选择分支后 `loadSubmodulesForRef(full, ref)` 以 `?ref=<branch>` 重新读取 `.gitmodules` 并刷新。状态存 `state.currentSubmodulesBranch` / `state.currentBranches`；带 `ref !== currentSubmodulesBranch` 的过期响应会被丢弃。
 
 ## HTML ↔ JS 桥接
 
-`index.html` 内联了 25 个 `onclick="xxx()"` / `onchange="xxx()"` 引用。
+`index.html` 内联了 26 个 `onclick="xxx()"` / `onchange="xxx()"` 引用。
 ES Module 默认作用域隔离，需要 `main.js` 末尾显式挂到 `window`：
 
 ```js

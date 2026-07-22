@@ -226,7 +226,14 @@ body {
             <div class="detail-right">
               <div id="submodule-section" style="margin-top:1rem">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
-                  <span style="font-weight:600;font-size:.9rem">子模块 <span id="submodule-count" style="color:var(--text3);font-weight:400;font-size:.8rem"></span></span>
+                  <div style="display:flex;align-items:center;gap:.5rem;position:relative">
+                    <span style="font-weight:600;font-size:.9rem">子模块 <span id="submodule-count" style="color:var(--text3);font-weight:400;font-size:.8rem"></span></span>
+                    <button id="submodule-branch-btn" class="btn btn-ghost btn-sm dropdown-toggle" onclick="toggleBranchMenu(event)" title="选择分支">&#128257; <span id="submodule-branch-label">默认分支</span> &#9662;</button>
+                    <div id="submodule-branch-dropdown" class="branch-dropdown" style="display:none">
+                      <input id="submodule-branch-search" class="branch-search" type="text" placeholder="搜索分支…" oninput="filterBranchList()">
+                      <div id="submodule-branch-list" class="branch-list"></div>
+                    </div>
+                  </div>
                   <div style="display:flex;align-items:center;gap:.5rem;position:relative">
                     <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;margin:0">
                       <input type="checkbox" id="submodule-select-all" onchange="toggleSelectAllSubmodules()"> 全选
@@ -415,6 +422,26 @@ body {
 .dropdown-item:last-child { border-bottom: none; }
 .dropdown-item:hover { background: var(--hover-bg); }
 .dropdown-toggle { padding-left: .4rem; padding-right: .4rem; }
+/* Branch selector dropdown */
+.branch-dropdown {
+  position: absolute; z-index: 60; top: 100%; left: 0; margin-top: 2px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.1); width: 240px; padding: .4rem;
+}
+.branch-search {
+  width: 100%; box-sizing: border-box; margin-bottom: .4rem;
+  padding: .35rem .5rem; font-size: .8rem;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg); color: var(--text);
+}
+.branch-list { max-height: 240px; overflow-y: auto; }
+.branch-item {
+  padding: .4rem .5rem; cursor: pointer; font-size: .8rem; border-radius: 4px;
+  color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.branch-item:hover { background: var(--hover-bg); }
+.branch-item.active { background: var(--hover-bg); font-weight: 600; }
+.branch-empty { padding: .4rem .5rem; font-size: .8rem; color: var(--text3); }
 /* Context menu */
 .context-menu {
   position: fixed; z-index: 200; background: var(--card);

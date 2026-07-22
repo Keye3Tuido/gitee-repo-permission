@@ -9,6 +9,8 @@ export const state = {
   currentUser: '',
   currentSubmodules: [],
   currentSubmodulesRepo: null,
+  currentSubmodulesBranch: null,
+  currentBranches: [],
   _loadGeneration: 0,
   _userSearchCache: {},
 };

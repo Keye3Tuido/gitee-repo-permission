@@ -1,5 +1,5 @@
 import { state } from './state.js';
-import { giteeApi, isRetryableApiError } from './api.js';
+import { giteeApi, giteeApiFetchAll, isRetryableApiError } from './api.js';
 import { extractRepoFullNamesFromText, hoverShow, hoverClear,
          copyTextToClipboard, setStatus, repoUrl } from './utils.js';
 import { getRepoApiPath, shouldClearRepoSelection, canSelectRepo,
@@ -9,9 +9,10 @@ import { renderRepoList } from './repos.js';
 import { showSubmoduleContextMenu } from './contextMenu.js';
 import { registerPermRetry } from './permRetry.js';
 
-async function getSubmoduleRepos(fullName) {
+async function getSubmoduleRepos(fullName, ref) {
   try {
-    const data = await giteeApi('GET', '/repos/' + fullName + '/contents/.gitmodules');
+    const path = '/repos/' + fullName + '/contents/.gitmodules' + (ref ? '?ref=' + encodeURIComponent(ref) : '');
+    const data = await giteeApi('GET', path);
     if (!data || !data.content) return [];
     const b64 = (data.content || '').replace(/\s+/g, '');
     const txt = atob(b64);
@@ -28,6 +29,24 @@ async function getSubmoduleRepos(fullName) {
   }
 }
 
+// 拉取分支列表与默认分支（GET /repos/{full}/branches + /repos/{full} 的 default_branch）
+async function loadRepoBranches(fullName) {
+  const both = await Promise.all([
+    giteeApiFetchAll('/repos/' + fullName + '/branches').catch(function() { return []; }),
+    giteeApi('GET', '/repos/' + fullName).catch(function() { return null; })
+  ]);
+  const branches = both[0];
+  const detail = both[1];
+  const names = (branches || []).map(function(b) { return b && b.name; }).filter(Boolean);
+  let def = detail && detail.default_branch;
+  if (!def || names.indexOf(def) === -1) {
+    def = names.indexOf('master') !== -1 ? 'master'
+        : (names.indexOf('main') !== -1 ? 'main' : (names[0] || null));
+  }
+  return { names: names, def: def };
+}
+
+// 打开仓库入口：初始化分支选择器 → 按默认分支加载子模块
 async function loadSubmodules(fullName) {
   const wrap = document.getElementById('submodule-list');
   const countEl = document.getElementById('submodule-count');
@@ -35,9 +54,27 @@ async function loadSubmodules(fullName) {
   wrap.innerHTML = '';
   if (countEl) countEl.textContent = '(加载中…)';
   state.currentSubmodules = []; state.currentSubmodulesRepo = null;
+  state.currentBranches = []; state.currentSubmodulesBranch = null;
+  renderBranchSelector();
+  const info = await loadRepoBranches(fullName);
+  if (fullName !== state.currentRepo) return;
+  state.currentBranches = info.names;
+  state.currentSubmodulesBranch = info.def || null;
+  renderBranchSelector();
+  await loadSubmodulesForRef(fullName, state.currentSubmodulesBranch);
+}
+
+// 按指定分支加载并渲染子模块（初次打开与切换分支共用）
+async function loadSubmodulesForRef(fullName, ref) {
+  const wrap = document.getElementById('submodule-list');
+  const countEl = document.getElementById('submodule-count');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  if (countEl) countEl.textContent = '(加载中…)';
+  state.currentSubmodules = []; state.currentSubmodulesRepo = null;
   try {
-    const subs = await getSubmoduleRepos(fullName);
-    if (fullName !== state.currentRepo) return;
+    const subs = await getSubmoduleRepos(fullName, ref);
+    if (fullName !== state.currentRepo || ref !== state.currentSubmodulesBranch) return;
     if (!subs || subs.length === 0) {
       wrap.innerHTML = '<div class="loading-text">暂无子模块</div>';
       if (countEl) countEl.textContent = '';
@@ -60,7 +97,7 @@ async function loadSubmodules(fullName) {
         });
       });
       const results = await Promise.all(promises);
-      if (fullName !== state.currentRepo) return;
+      if (fullName !== state.currentRepo || ref !== state.currentSubmodulesBranch) return;
       for (let i = 0; i < results.length; i++) {
         const res = results[i];
         const sub = state.currentSubmodules[i];
@@ -261,4 +298,83 @@ async function copyFailedSubmoduleUrls() {
   );
 }
 
-export { getSubmoduleRepos, loadSubmodules, renderSubmoduleList, toggleSelectAllSubmodules, copyUnauthorizedSubmoduleUrls, copyNonAdminSubmoduleUrls, copySelectedSubmoduleUrls, copyPullOnlySubmoduleUrls, copyFailedSubmoduleUrls };
+// ── 分支选择器 ──
+function renderBranchSelector() {
+  const label = document.getElementById('submodule-branch-label');
+  if (label) label.textContent = state.currentSubmodulesBranch || '默认分支';
+  renderBranchList('');
+}
+
+function renderBranchList(filter) {
+  const listEl = document.getElementById('submodule-branch-list');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+  const kw = (filter || '').trim().toLowerCase();
+  const all = state.currentBranches || [];
+  const names = all.filter(function(n) { return !kw || n.toLowerCase().indexOf(kw) !== -1; });
+  if (names.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'branch-empty';
+    empty.textContent = all.length === 0 ? '加载中…' : '无匹配分支';
+    listEl.appendChild(empty);
+    return;
+  }
+  names.forEach(function(name) {
+    const item = document.createElement('div');
+    item.className = 'branch-item' + (name === state.currentSubmodulesBranch ? ' active' : '');
+    item.textContent = name;
+    item.title = name;
+    item.onclick = function() { selectSubmoduleBranch(name); };
+    listEl.appendChild(item);
+  });
+}
+
+function filterBranchList() {
+  const s = document.getElementById('submodule-branch-search');
+  renderBranchList(s ? s.value : '');
+}
+
+function selectSubmoduleBranch(branch) {
+  closeBranchMenu();
+  if (!branch || branch === state.currentSubmodulesBranch) return;
+  state.currentSubmodulesBranch = branch;
+  renderBranchSelector();
+  loadSubmodulesForRef(state.currentRepo, branch);
+}
+
+function toggleBranchMenu(e) {
+  if (e) e.stopPropagation();
+  const menu = document.getElementById('submodule-branch-dropdown');
+  if (!menu) return;
+  if (!menu.style.display || menu.style.display === 'none') {
+    menu.style.display = 'block';
+    renderBranchList('');
+    const s = document.getElementById('submodule-branch-search');
+    if (s) { s.value = ''; setTimeout(function() { s.focus(); }, 0); }
+    setTimeout(function() {
+      document.addEventListener('click', onBranchDocClick);
+      document.addEventListener('keydown', onBranchEsc);
+    }, 0);
+  } else {
+    closeBranchMenu();
+  }
+}
+
+function closeBranchMenu() {
+  const menu = document.getElementById('submodule-branch-dropdown');
+  if (menu) menu.style.display = 'none';
+  document.removeEventListener('click', onBranchDocClick);
+  document.removeEventListener('keydown', onBranchEsc);
+}
+
+function onBranchDocClick(e) {
+  const menu = document.getElementById('submodule-branch-dropdown');
+  const btn = document.getElementById('submodule-branch-btn');
+  if (menu && menu.contains(e.target)) return;
+  if (btn && btn.contains(e.target)) return;
+  closeBranchMenu();
+}
+
+function onBranchEsc(e) { if (e.key === 'Escape') closeBranchMenu(); }
+
+export { getSubmoduleRepos, loadSubmodules, loadSubmodulesForRef, loadRepoBranches, renderSubmoduleList, toggleSelectAllSubmodules, copyUnauthorizedSubmoduleUrls, copyNonAdminSubmoduleUrls, copySelectedSubmoduleUrls, copyPullOnlySubmoduleUrls, copyFailedSubmoduleUrls, toggleBranchMenu, closeBranchMenu, filterBranchList };

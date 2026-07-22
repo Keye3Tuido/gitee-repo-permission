@@ -74,6 +74,9 @@ Object.assign(window, {
   copySelectedSubmoduleUrls: submodules.copySelectedSubmoduleUrls,
   copyPullOnlySubmoduleUrls: submodules.copyPullOnlySubmoduleUrls,
   copyFailedSubmoduleUrls: submodules.copyFailedSubmoduleUrls,
+  toggleBranchMenu: submodules.toggleBranchMenu,
+  closeBranchMenu: submodules.closeBranchMenu,
+  filterBranchList: submodules.filterBranchList,
   // tabs.js
   switchTab: tabs.switchTab,
   switchMobileTab: tabs.switchMobileTab,
