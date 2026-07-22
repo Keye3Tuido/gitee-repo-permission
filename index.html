@@ -225,7 +225,7 @@ body {
             </div>
             <div class="detail-right">
               <div id="submodule-section" style="margin-top:1rem">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+                <div class="submodule-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
                   <div style="display:flex;align-items:center;gap:.5rem;position:relative">
                     <span style="font-weight:600;font-size:.9rem">子模块 <span id="submodule-count" style="color:var(--text3);font-weight:400;font-size:.8rem"></span></span>
                     <button id="submodule-branch-btn" class="btn btn-ghost btn-sm dropdown-toggle" onclick="toggleBranchMenu(event)" title="选择分支">&#128257; <span id="submodule-branch-label">默认分支</span> &#9662;</button>
@@ -442,6 +442,12 @@ body {
 .branch-item:hover { background: var(--hover-bg); }
 .branch-item.active { background: var(--hover-bg); font-weight: 600; }
 .branch-empty { padding: .4rem .5rem; font-size: .8rem; color: var(--text3); }
+/* 分支按钮：长分支名(含中文)截断，避免撑爆标题行 */
+#submodule-branch-btn { max-width: 200px; }
+#submodule-branch-label {
+  display: inline-block; max-width: 140px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; vertical-align: middle;
+}
 /* Context menu */
 .context-menu {
   position: fixed; z-index: 200; background: var(--card);
@@ -526,6 +532,10 @@ body {
     box-shadow: 0 4px 16px rgba(0,0,0,.1) !important; left: 0; right: 0; width: auto; }
   /* Collab items stack better */
   .collab-item { flex-wrap: wrap; gap: .4rem; }
+  /* 子模块标题行：窄屏允许换行，分支下拉不超出视口，分支名进一步截断 */
+  .submodule-header { flex-wrap: wrap; row-gap: .4rem; }
+  .branch-dropdown { width: min(240px, calc(100vw - 2.5rem)); }
+  #submodule-branch-label { max-width: 45vw; }
 }
 </style>
 
