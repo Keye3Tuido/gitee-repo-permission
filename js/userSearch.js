@@ -1,5 +1,16 @@
 import { state } from './state.js';
 import { getToken } from './api.js';
+import { resolveUserOrgs, renderOrgBadges } from './orgs.js';
+
+// Bumped on every re-render so stale async org fills can be discarded.
+let orgFillGeneration = 0;
+
+function makeOrgHint(text) {
+  const el = document.createElement('span');
+  el.className = 'ud-org-none';
+  el.textContent = text;
+  return el;
+}
 
 function setupUserSearch(inputEl, dropdownEl) {
   var searchTimer = null;
@@ -48,6 +59,7 @@ async function doUserSearch(query, dropdownEl, inputEl) {
 
 function renderUserDropdown(users, dropdownEl, inputEl) {
   dropdownEl.innerHTML = '';
+  const myGeneration = ++orgFillGeneration;
   if (!users || users.length === 0) {
     var _noUserHint = document.createElement('div'); _noUserHint.className = 'user-dropdown-hint'; _noUserHint.textContent = '\u672a\u627e\u5230\u7528\u6237'; dropdownEl.appendChild(_noUserHint);
     dropdownEl.classList.add('open');
@@ -64,6 +76,18 @@ function renderUserDropdown(users, dropdownEl, inputEl) {
       var nameEl = document.createElement('div'); nameEl.className = 'ud-name'; nameEl.textContent = u.name || u.login;
       var loginEl = document.createElement('div'); loginEl.className = 'ud-login'; loginEl.textContent = '@' + u.login;
       info.appendChild(nameEl); info.appendChild(loginEl);
+      // Org row: placeholder first, filled asynchronously (stale fills dropped).
+      var orgsEl = document.createElement('div'); orgsEl.className = 'ud-orgs';
+      orgsEl.appendChild(makeOrgHint('\u7ec4\u7ec7\u52a0\u8f7d\u4e2d\u2026'));
+      info.appendChild(orgsEl);
+      if (u.login) {
+        resolveUserOrgs(u.login).then(function(result) {
+          if (myGeneration !== orgFillGeneration) return;
+          renderOrgBadges(orgsEl, result);
+        });
+      } else {
+        renderOrgBadges(orgsEl, { orgs: [], failed: false });
+      }
       div.appendChild(img);
       div.appendChild(info);
       div.addEventListener('mousedown', function(e) {

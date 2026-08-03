@@ -7,6 +7,7 @@ import { showDowngradeDecisionModal } from './modal.js';
 import { switchTab } from './tabs.js';
 import { setupUserSearch } from './userSearch.js';
 import { loadSubmodules } from './submodules.js';
+import { attachOrgRow } from './orgs.js';
 import { setBatchLoading } from './repos.js';
 
 function updateDetailPermBadges(fullName) {
@@ -198,6 +199,11 @@ function renderCollabList(filter) {
       var nameDiv = document.createElement('div'); nameDiv.className = 'collab-name'; nameDiv.textContent = c.name || c.login;
       var loginDiv = document.createElement('div'); loginDiv.className = 'collab-login'; loginDiv.textContent = '@' + c.login;
       info.appendChild(nameDiv); info.appendChild(loginDiv);
+      // 组织：协作者可能上百人，故只用已建好的反向索引（publicOrgs:false = 每人零额外请求）
+      info.appendChild(attachOrgRow(c.login, {
+        publicOrgs: false,
+        isStale: function() { return state.currentRepo !== fullName; },
+      }));
 
       // Resolve collaborator permission — Gitee API returns `permissions` (object) or `permission` (object or string)
       var _rawPerm = c.permissions || c.permission;

@@ -13,6 +13,10 @@ export const state = {
   currentBranches: [],
   _loadGeneration: 0,
   _userSearchCache: {},
+  _userOrgsCache: {},
+  _pendingUserOrgs: {},
+  _myOrgs: null,
+  _myOrgMemberIndex: null,
 };
 
 export const PERM_LEVEL = { pull: 0, push: 1, admin: 2 };

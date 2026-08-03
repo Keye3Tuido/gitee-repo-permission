@@ -133,6 +133,7 @@ body {
     <span id="current-user-display" style="font-size:.8rem;color:var(--text3);margin-left:auto;display:none;align-items:center;gap:.4rem">
       <img id="current-user-avatar" style="width:20px;height:20px;border-radius:50%;vertical-align:middle" src="" alt="">
       <span id="current-user-name"></span>
+      <span id="current-user-orgs" class="profile-orgs"></span>
     </span>
   </div>
 
@@ -483,6 +484,36 @@ body {
 .user-dropdown-item .ud-name { font-weight: 600; font-size: .8rem; }
 .user-dropdown-item .ud-login { color: var(--text3); font-size: .75rem; font-family: var(--mono); }
 .user-dropdown-hint { padding: .4rem .6rem; font-size: .75rem; color: var(--text3); }
+/* 用户所属组织（搜索下拉 + 协作者列表共用） */
+.ud-orgs {
+  display: flex; align-items: center; flex-wrap: wrap; gap: .25rem; margin-top: .15rem;
+}
+.ud-org {
+  display: inline-block; flex-shrink: 0; max-width: 120px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+  padding: .05rem .3rem; border-radius: 3px; font-size: .7rem;
+  background: var(--hover-bg); color: var(--text2);
+  border: 1px solid var(--border);
+}
+/* 与我共同的组织：高亮；仅公开信息的组织：默认灰底 */
+.ud-org-shared {
+  background: var(--selected-bg);
+  border-color: var(--primary); color: var(--primary);
+}
+.ud-org-more { font-weight: 600; }
+.ud-org-none { font-size: .7rem; color: var(--text3); font-style: italic; }
+/* 右上角 profile 的组织徽章 */
+.profile-orgs { display: inline-flex; align-items: center; gap: .25rem; max-width: 40vw; overflow: hidden; }
+/* 悬浮“+N”时弹出的全部组织浮层（挂在 body 上，不受父级 overflow 裁剪） */
+.org-popover {
+  position: fixed; z-index: 9999; pointer-events: none;
+  display: flex; flex-wrap: wrap; gap: .25rem; align-content: flex-start;
+  max-width: min(360px, calc(100vw - 16px)); max-height: 40vh; overflow: hidden;
+  padding: .4rem; border-radius: 6px;
+  background: var(--card); border: 1px solid var(--border);
+  box-shadow: 0 6px 20px rgba(0,0,0,.16);
+}
+.org-popover .ud-org { flex-shrink: 0; max-width: 160px; }
 /* Modal user search */
 .modal .user-search-wrap { display: block; width: 100%; }
 .modal .user-search-wrap input { width: 100%; }

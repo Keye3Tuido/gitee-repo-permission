@@ -19,6 +19,7 @@ gitee-repo-permission/
     ├── modal.js       # 通用降级决策模态框
     ├── contextMenu.js # 通用右键上下文菜单（仓库 + 子模块）
     ├── userSearch.js  # 用户搜索 dropdown（自动补全）
+    ├── orgs.js        # 组织数据（我的组织 / 反向成员索引）+ 徽章渲染
     ├── tabs.js        # 桌面 / 移动端 tab 切换
     ├── submodules.js  # 子模块解析与渲染 + 分支选择 + 复制链接
     ├── collabs.js     # 仓库详情 + 协作者 CRUD + 仓内批量
@@ -39,6 +40,7 @@ graph TD
     permRetry[permRetry.js]
     modal[modal.js]
     userSearch[userSearch.js]
+    orgs[orgs.js]
     submodules[submodules.js]
     collabs[collabs.js]
     repos[repos.js]
@@ -58,6 +60,10 @@ graph TD
 
     userSearch --> state
     userSearch --> api
+    userSearch --> orgs
+
+    orgs --> state
+    orgs --> api
 
     submodules --> state
     submodules --> api
@@ -74,6 +80,7 @@ graph TD
     collabs --> modal
     collabs --> tabs
     collabs --> userSearch
+    collabs --> orgs
     collabs --> submodules
     collabs --> repos
 
@@ -86,6 +93,7 @@ graph TD
     repos --> submodules
     repos --> contextMenu
     repos --> permRetry
+    repos --> orgs
 
     batch --> state
     batch --> api
@@ -124,10 +132,11 @@ ESM 容忍，因为所有调用都发生在函数体内（运行时），不在�
 | **permRetry.js** | `registerPermRetry`, `unregisterPermRetry`, `clearPermRetries` | 权限加载失败后的后台定时重试：Map 存任务，每 4s 一轮，成功或失效即移除，队列空自动停表 |
 | **modal.js** | `showDowngradeDecisionModal` | 通用 Promise 化模态框（`batch` 三按钮 / `single` 两按钮），无外部依赖 |
 | **contextMenu.js** | `showRepoContextMenu`, `showSubmoduleContextMenu`, `closeContextMenu` | 通用右键上下文菜单，支持边界检测和 ESC 关闭 |
-| **userSearch.js** | `setupUserSearch`, `doUserSearch`, `renderUserDropdown`, `closeUserDropdown` | 用户搜索 dropdown，带 `state._userSearchCache` 缓存 |
+| **userSearch.js** | `setupUserSearch`, `doUserSearch`, `renderUserDropdown`, `closeUserDropdown` | 用户搜索 dropdown，带 `state._userSearchCache` 缓存；条目内组织展示委托给 `orgs.js`。**本文件保持 ASCII-only（中文用 `\u` 转义）**，写入时勿改成字面中文 |
+| **orgs.js** | `loadMyOrgs`, `loadMyOrgMemberIndex`, `fetchUserPublicOrgs`, `resolveUserOrgs`, `renderOrgBadges`, `renderMyOrgsBadge`, `attachOrgRow`, `hideOrgPopover`, `resetOrgCaches` | 组织数据与徽章渲染（被 `userSearch.js` / `collabs.js` / `repos.js` 共用）。**保持 ASCII-only（中文用 `\u` 转义）**——注释里也别用 `─` 等非 ASCII 符号，会把整个文件写成 iso-8859-1 |
 | **tabs.js** | `switchTab`, `switchMobileTab` | tab 切换；纯 DOM |
 | **submodules.js** | `getSubmoduleRepos`, `loadSubmodules`, `loadSubmodulesForRef`, `loadRepoBranches`, `renderSubmoduleList`, `toggleSelectAllSubmodules`, `copyUnauthorizedSubmoduleUrls`, `copyNonAdminSubmoduleUrls`, `copySelectedSubmoduleUrls`, `copyPullOnlySubmoduleUrls`, `copyFailedSubmoduleUrls`, `toggleBranchMenu`, `closeBranchMenu`, `filterBranchList` | 按分支解析 `.gitmodules` 并并发拉权限、右键菜单、按权限状态复制链接（无权限 / 权限请求失败 / 只读 / 无管理权限 / 选中）；分支选择器（带搜索）切换后按 `ref` 重载 |
-| **collabs.js** | `loadRepoDetail`, `renderCollabList`, `updateDetailPermBadges`, `updateCollabPermission`, `removeCollab`, `promptAddCollab`, `batchCollabUpdatePerm`, `batchCollabRemove`, `toggleSelectAllCollabs`, `updateCollabBatchBar` | 当前选中仓库的协作者管理 |
+| **collabs.js** | `loadRepoDetail`, `renderCollabList`, `updateDetailPermBadges`, `updateCollabPermission`, `removeCollab`, `promptAddCollab`, `batchCollabUpdatePerm`, `batchCollabRemove`, `toggleSelectAllCollabs`, `updateCollabBatchBar` | 当前选中仓库的协作者管理；每个协作者下方经 `orgs.js` 的 `attachOrgRow` 显示所属（共同）组织 |
 | **repos.js** | `loadAllRepos`, `renderRepoList`, `toggleSelectAllVisible`, `selectAllVisible`, `deselectAll`, `setBatchLoading`, `getPermGroup`, `openClipboardSelectModal`, `copySelectedRepoUrls` | 仓库列表加载与渲染、剪贴板导入、右键菜单、复制链接 |
 | **batch.js** | `batchAddCollab`, `batchRemoveCollab` | 侧栏跨仓库批量授权/移除，含降级预检流程 |
 | **main.js** | （无导出） | 启动 IIFE、四组事件监听、`Object.assign(window, ...)` 暴露 26 个函数 |
@@ -148,8 +157,14 @@ export const state = {
   currentUser: '',           // 已登录用户的 login
   currentSubmodules: [],     // 当前仓库的子模块
   currentSubmodulesRepo: null,
+  currentSubmodulesBranch: null, // 子模块当前查看的分支
+  currentBranches: [],       // 当前仓库分支列表（分支选择器用）
   _loadGeneration: 0,        // 加载代次，用于忽略过期回调
   _userSearchCache: {},      // 用户搜索结果缓存
+  _userOrgsCache: {},        // login → 公开组织[]（失败不缓存）
+  _pendingUserOrgs: {},      // 公开组织请求的并发去重
+  _myOrgs: null,             // 我所在的组织[]
+  _myOrgMemberIndex: null,   // login → 我的组织[]（反向成员索引）
 };
 
 export const PERM_LEVEL = { pull: 0, push: 1, admin: 2 };
@@ -225,6 +240,19 @@ openClipboardSelectModal (repos.js)
 - 复制链接：
   - `repos.js` 的 `renderRepoList` 在「权限请求失败」与「无权限」两组的分组标题右侧各注入一个「复制链接」按钮，复制本组（受当前搜索过滤）全部仓库链接。
   - 子模块面板 ⋮ 菜单按权限状态复制：无权限（`copyUnauthorizedSubmoduleUrls`）/ 权限请求失败（`copyFailedSubmoduleUrls`）/ 只读（`copyPullOnlySubmoduleUrls`）/ 无管理权限（`copyNonAdminSubmoduleUrls`），以及复制选中（`copySelectedSubmoduleUrls`）。
+- 组织展示（`orgs.js`）：
+  - **Gitee 隐私限制（实测）**：`GET /users/{login}/orgs` 只返回**公开的**成员关系，绝大多数用户返回 `[]`（已验证：`red_base` 的 113 名成员中，`leonli`/`dancingfish`/`inphyy` 等经该接口均为空）。这不是权限问题，需对方自行公开，无法绕过。
+  - **主数据源改为"我的组织反查"**：`loadMyOrgMemberIndex` 用 `GET /user/orgs` + 各组织 `GET /orgs/{org}/members`（`giteeApiFetchAll` 分页）建 `login → 组织[]` 反向索引，缓存于 `state._myOrgMemberIndex`。因自己是组织成员，有权列成员，故**无视对方是否公开**。实测成本：2 个组织 / 113+6 人 ≈ 1.4s、3 个请求，仅加载一次。
+  - `resolveUserOrgs(login)` 合并两个来源：共同组织（`shared:true`，主色高亮 `.ud-org-shared`）+ 对方公开的其他组织（灰底，`title` 标注"仅公开信息"）。
+  - `renderOrgBadges` 统一渲染三形态：空 → 「无共同组织」（**不写"无组织"**，因私有成员关系不可见）、单个 → 1 徽章、多个 → 前 `max`(默认 2) 个 + 「+N」。折叠态 DOM 节点数恒定（≤ max+1），30 个组织也不会撑爆布局。
+  - **「+N」悬浮浮层**：鼠标移到 `+N` 立即弹出 `.org-popover` 列出**全部**组织。浮层挂在 `document.body` 上并用 `position:fixed` + 视口避让，因此不受父级 `overflow:hidden` 裁剪、不引起布局跳动（早期"就地展开"方案在顶栏会被 flex 压成碎条，故废弃）；`pointer-events:none`，移开即销毁，重复悬浮幂等。
+  - **title 策略**：`title` 只加在**单个徽章**上（解释被 CSS `ellipsis` 截断的长名）。容器与 `+N` **一律不加 `title`**——否则原生提示（约 1s 延迟）会盖住即时浮层。测试有断言守这条。
+  - 三个接入点：
+    - 用户搜索下拉：两个入口（侧栏批量授权输入框、`promptAddCollab` 模态框）共用 `renderUserDropdown`，只在此处接入即可全覆盖；用 `orgFillGeneration` 丢弃过期填充。合并两个来源。
+    - 仓库协作者列表（`collabs.js` 的 `renderCollabList`）：用 `attachOrgRow(login, { publicOrgs: false, isStale })`。**协作者可能上百人，故只用共同组织索引，`publicOrgs:false` 保证每人零额外请求**，避免触发限流；`isStale` 绑定 `state.currentRepo`，切库即丢弃过期结果。代价是这里看不到"对方公开的其他组织"。
+    - 右上角 profile：`repos.js` 的 `loadAllRepos` 取到 `/user` 后调 `renderMyOrgsBadge()` 渲染到 `#current-user-orgs`；自己的组织可完整看到，故空时显示「无组织」。
+  - **账号级缓存必须随 Token 失效**：`loadAllRepos` 在重新识别账号前调用 `resetOrgCaches()`，否则换 Token 后会沿用上一个账号的组织做"共同组织"判定。
+  - 已知限制：索引成本随组织规模线性增长（组织数 × 成员分页）。当前规模（2 组织 / 119 人 ≈ 1.4s）无感；若某账号属于很多大组织，首次搜索会明显变慢（未做懒加载，属预防性优化，暂缓）。
 - 子模块分支选择器：打开仓库时 `loadSubmodules` 先经 `loadRepoBranches`（`GET /repos/{full}/branches` + `/repos/{full}` 的 `default_branch`）取分支列表与默认分支，标题旁按钮展开"带搜索框的下拉窗口"（`toggleBranchMenu`/`filterBranchList`）；选择分支后 `loadSubmodulesForRef(full, ref)` 以 `?ref=<branch>` 重新读取 `.gitmodules` 并刷新。状态存 `state.currentSubmodulesBranch` / `state.currentBranches`；带 `ref !== currentSubmodulesBranch` 的过期响应会被丢弃。
 
 ## HTML ↔ JS 桥接

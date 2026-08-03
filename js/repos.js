@@ -12,6 +12,7 @@ import { showRepoContextMenu } from './contextMenu.js';
 import { loadRepoDetail, updateDetailPermBadges } from './collabs.js';
 import { renderSubmoduleList } from './submodules.js';
 import { registerPermRetry, clearPermRetries } from './permRetry.js';
+import { renderMyOrgsBadge, resetOrgCaches } from './orgs.js';
 
 function setBatchLoading(loading) {
   var addBtn = document.querySelector('.batch-bar .btn-success');
@@ -184,6 +185,8 @@ async function loadAllRepos() {
   updateProgress();
 
   // ── Get user info ───────────────────────────────────────────
+  // 组织数据与账号绑定：换 Token 后必须失效，否则会用上一个账号的组织做判定
+  resetOrgCaches();
   var user;
   try {
     user = await giteeApi('GET', '/user');
@@ -207,6 +210,7 @@ async function loadAllRepos() {
       userAvatarEl.onerror = function() { userAvatarEl.style.display = 'none'; };
     }
     userDisplay.style.display = 'flex';
+    renderMyOrgsBadge();
   }
 
   // ── Phase A: user repos + org repos all concurrent ──────────
