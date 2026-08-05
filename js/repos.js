@@ -1,5 +1,5 @@
 import { state } from './state.js';
-import { giteeApi, giteeApiFetchAll, getToken } from './api.js';
+import { giteeApi, giteeApiRetry, giteeApiFetchAll, getToken } from './api.js';
 import { setStatus, appendLog, copyTextToClipboard, repoUrl } from './utils.js';
 import { repoMatchesFilter, getRepoPermissionState, canSelectRepo,
          shouldClearRepoSelection, getRepoSelectionDisabledTitle,
@@ -189,8 +189,9 @@ async function loadAllRepos() {
   resetOrgCaches();
   var user;
   try {
-    user = await giteeApi('GET', '/user');
+    user = await giteeApiRetry('GET', '/user');
   } catch (e) {
+    // 成因说明已由 api.js 写进 e.message，此处不再重复拼接
     setStatus('\u52a0\u8f7d\u5931\u8d25: ' + e.message);
     appendLog('\u52a0\u8f7d\u5931\u8d25: ' + e.message, 'err');
     btn.disabled = false; btn.textContent = '\u52a0\u8f7d\u4ed3\u5e93';
@@ -221,7 +222,7 @@ async function loadAllRepos() {
     var page = 1;
     while (page <= 100) {
       if (state._loadGeneration !== myGeneration) return;
-      var data = await giteeApi('GET', '/user/repos?type=all&sort=full_name&per_page=100&page=' + page);
+      var data = await giteeApiRetry('GET', '/user/repos?type=all&sort=full_name&per_page=100&page=' + page);
       if (!Array.isArray(data) || data.length === 0) break;
       var added = 0;
       for (var i = 0; i < data.length; i++) if (addRepo(data[i])) added++;
@@ -242,7 +243,7 @@ async function loadAllRepos() {
             var orgPage = 1;
             while (orgPage <= 100) {
               if (state._loadGeneration !== myGeneration) return;
-              var data = await giteeApi('GET', '/orgs/' + org.login + '/repos?type=all&per_page=100&page=' + orgPage);
+              var data = await giteeApiRetry('GET', '/orgs/' + org.login + '/repos?type=all&per_page=100&page=' + orgPage);
               if (!Array.isArray(data) || data.length === 0) break;
               var added = 0;
               for (var i = 0; i < data.length; i++) if (addRepo(data[i])) added++;

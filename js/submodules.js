@@ -1,7 +1,7 @@
 import { state } from './state.js';
-import { giteeApi, giteeApiFetchAll, isRetryableApiError } from './api.js';
+import { giteeApi, giteeApiRetry, giteeApiFetchAll, isRetryableApiError } from './api.js';
 import { extractRepoFullNamesFromText, hoverShow, hoverClear,
-         copyTextToClipboard, setStatus, repoUrl } from './utils.js';
+         copyTextToClipboard, setStatus, appendLog, repoUrl } from './utils.js';
 import { getRepoApiPath, shouldClearRepoSelection, canSelectRepo,
          createRepoPermissionBadgeWrap,
          getRepoPermissionState } from './permissions.js';
@@ -12,7 +12,7 @@ import { registerPermRetry } from './permRetry.js';
 async function getSubmoduleRepos(fullName, ref) {
   try {
     const path = '/repos/' + fullName + '/contents/.gitmodules' + (ref ? '?ref=' + encodeURIComponent(ref) : '');
-    const data = await giteeApi('GET', path);
+    const data = await giteeApiRetry('GET', path);
     if (!data || !data.content) return [];
     const b64 = (data.content || '').replace(/\s+/g, '');
     const txt = atob(b64);
@@ -25,6 +25,13 @@ async function getSubmoduleRepos(fullName, ref) {
     }
     return Array.from(new Set(repos));
   } catch (e) {
+    // 404 = 该分支确实没有 .gitmodules（正常情况，静默按“无子模块”处理）。
+    // 其它失败（网络/限流/5xx）必须记日志：否则会被伪装成“暂无子模块”，
+    // 让人误以为仓库没有子模块，而实际是没读取成功。
+    if (e && e.status !== 404) {
+      appendLog('读取 .gitmodules 失败: ' + fullName + (ref ? ' @' + ref : '') + ' - ' + e.message, 'err');
+      throw e;
+    }
     return [];
   }
 }
@@ -131,7 +138,14 @@ async function loadSubmodulesForRef(fullName, ref) {
       renderSubmoduleList();
     }
   } catch (e) {
-    wrap.innerHTML = '<div class="err-text">加载子模块失败</div>';
+    // 已切库/切分支则丢弃，避免把过期错误显示在新仓库的面板上
+    if (fullName !== state.currentRepo || ref !== state.currentSubmodulesBranch) return;
+    // 带上原因：区分“真的没有子模块”与“没读到子模块”
+    wrap.innerHTML = '';
+    var errDiv = document.createElement('div');
+    errDiv.className = 'err-text';
+    errDiv.textContent = '加载子模块失败: ' + (e && e.message ? e.message : e);
+    wrap.appendChild(errDiv);
     if (countEl) countEl.textContent = '';
   }
 }

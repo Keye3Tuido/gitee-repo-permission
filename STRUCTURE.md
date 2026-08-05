@@ -127,7 +127,7 @@ ESM 容忍，因为所有调用都发生在函数体内（运行时），不在�
 |---|---|---|
 | **state.js** | `state`, `PERM_LEVEL` | 全部模块共享同一 `state` 对象引用 |
 | **utils.js** | `setStatus`, `appendLog`, `clearLog`, `hoverShow/Clear`, `copyTextToClipboard`, `readTextFromClipboard`, `fallbackCopyText`, `extractRepoFullNamesFromText`, `repoUrl` | 纯工具，无外部依赖；`repoUrl` 统一"取 html_url，缺失则回退 https://gitee.com/full_name" |
-| **api.js** | `giteeApi`, `giteeApiFetchAll`, `getToken`, `rememberToken`, `clearTokenCache`, `toggleTokenVisibility`, `isRetryableApiError` | 所有 Gitee REST 调用统一入口；`isRetryableApiError` 判定失败是否为网络类（可重试） |
+| **api.js** | `giteeApi`, `giteeApiRetry`, `giteeApiFetchAll`, `getToken`, `rememberToken`, `clearTokenCache`, `toggleTokenVisibility`, `isRetryableApiError` | 所有 Gitee REST 调用统一入口；`isRetryableApiError` 判定失败是否为网络类（可重试）；`giteeApiRetry` 带指数退避重试 + 可诊断报错（见下节） |
 | **permissions.js** | `getRepoPermissionState`, `canSelectRepo`, `requestRepoPermission`, `createRepoPermissionBadgeWrap`, `getCurrentPermLevel`, `permLevelToLabel`, `fetchTargetUserPermLevel`, `precheckTargetUserPermissions`, `classifyDowngrades`, `repoMatchesFilter`, `getRepoApiPath`, `applyRepoPermissionData`, `findMainRepoByFullName`, `ensureRepoInMainList`, `shouldClearRepoSelection`, `getRepoSelectionDisabledTitle` | 权限读取、分类、降级预检 |
 | **permRetry.js** | `registerPermRetry`, `unregisterPermRetry`, `clearPermRetries` | 权限加载失败后的后台定时重试：Map 存任务，每 4s 一轮，成功或失效即移除，队列空自动停表 |
 | **modal.js** | `showDowngradeDecisionModal` | 通用 Promise 化模态框（`batch` 三按钮 / `single` 两按钮），无外部依赖 |
@@ -240,6 +240,16 @@ openClipboardSelectModal (repos.js)
 - 复制链接：
   - `repos.js` 的 `renderRepoList` 在「权限请求失败」与「无权限」两组的分组标题右侧各注入一个「复制链接」按钮，复制本组（受当前搜索过滤）全部仓库链接。
   - 子模块面板 ⋮ 菜单按权限状态复制：无权限（`copyUnauthorizedSubmoduleUrls`）/ 权限请求失败（`copyFailedSubmoduleUrls`）/ 只读（`copyPullOnlySubmoduleUrls`）/ 无管理权限（`copyNonAdminSubmoduleUrls`），以及复制选中（`copySelectedSubmoduleUrls`）。
+- 错误可诊断性与重试（`api.js`）：
+  - **每条报错都带接口标识**：`giteeApi` 把 `方法 + 路径`（去掉查询串）写进 `message`，并在错误对象上挂 `method` / `path` / `label` / `status`，避免出现「API 404: Not Found Project」却不知是哪个接口。
+  - **网络类失败给出成因而非 `Failed to fetch`**：`fetch` 被 reject 时浏览器不提供状态码（控制台只显示 CORS 或 `net::ERR_FAILED`），故消息里直接写明可能原因（浏览器扩展/网络拦截、跨域预检被拦、网络中断）并给出可执行建议（开无痕窗口禁用扩展重试），同时保留原始 message 便于深入排查；`navigator.onLine === false` 时改为明确的「浏览器处于离线状态」，并置 `err.offline`。
+  - **`giteeApiRetry`**：网络类 + 408/429/5xx 指数退避重试（默认 3 次，0.5s/1s/2s + 抖动）；服务端给了 `Retry-After` 就优先照它等（错误对象上挂 `retryAfter`），但**封顶 10s**（`MAX_RETRY_AFTER_MS`）——否则服务端给个 3600 界面就等于卡死；`Retry-After` 为 HTTP-date 形式时不采纳，退回指数退避。**每次重试都写日志**（第几次、失败原因、等待多久、是否服务端要求），成功与最终失败也留痕——否则"重试了几次、为什么"完全不可见。`{ silent: true }` 供后台静默重试使用。
+  - **只对幂等方法（GET/HEAD）自动重试**：网络类失败无法区分"请求没发出去"与"已生效但响应丢了"，对 POST/PUT/DELETE 重试可能重复执行（如重复添加协作者）。非幂等方法直接透传单次调用，确需重试要显式传 `{ allowUnsafeRetry: true }`。
+  - 写日志经 `logQuietly` 包一层 try/catch：日志面板不存在时，记日志失败**不得掩盖真正的业务错误**。
+  - 接入点：首个 `/user`、`/user/repos` 与 `/orgs/{org}/repos` 分页、`giteeApiFetchAll` 各页、`.gitmodules` 读取。**首个 `/user` 原先无任何重试，一次抖动就整个加载中止**（这是"经常报 CORS 错误"的痛感来源）。
+  - 每仓库权限（`permissions.js`）不走这里：它有独立的 `permRetry` 后台重试，叠加会让延迟翻倍。
+  - **失败不得伪装成空**：`getSubmoduleRepos` 只对 **404**（该分支确实没有 `.gitmodules`）静默返回 `[]`；其它失败记日志并抛出，UI 显示「加载子模块失败: 原因」。此前一律 `catch` 成 `[]`，界面显示「暂无子模块」，会让人误判仓库真的没有子模块。错误渲染前同样要过 `currentRepo` / `currentSubmodulesBranch` 的过期检查，避免把过期错误显示到已切换的仓库上。
+  - 关于 CORS 报错的实测结论：Gitee 的预检与响应**本身带全套 CORS 头**（`OPTIONS` 返回 `Access-Control-Allow-Origin: *`、`Allow-Headers: authorization`，200/404 响应亦带；45 并发与真实 Chrome 12 连发均全部成功）。故这类报错并非 Gitee 配置缺失，而是偶发被拦截/限流后返回了不带 CORS 头的响应。**认证仍用 `Authorization` 头**，不改用 `access_token` 查询参数——后者虽可免预检，但会把 Token 暴露在 URL / 历史 / Referer 里。
 - 组织展示（`orgs.js`）：
   - **Gitee 隐私限制（实测）**：`GET /users/{login}/orgs` 只返回**公开的**成员关系，绝大多数用户返回 `[]`（已验证：`red_base` 的 113 名成员中，`leonli`/`dancingfish`/`inphyy` 等经该接口均为空）。这不是权限问题，需对方自行公开，无法绕过。
   - **主数据源改为"我的组织反查"**：`loadMyOrgMemberIndex` 用 `GET /user/orgs` + 各组织 `GET /orgs/{org}/members`（`giteeApiFetchAll` 分页）建 `login → 组织[]` 反向索引，缓存于 `state._myOrgMemberIndex`。因自己是组织成员，有权列成员，故**无视对方是否公开**。实测成本：2 个组织 / 113+6 人 ≈ 1.4s、3 个请求，仅加载一次。
