@@ -94,7 +94,7 @@ function showDowngradeDecisionModal(opts) {
 
     if (opts.mode === 'batch') {
       var skipBtn = document.createElement('button');
-      skipBtn.className = 'btn btn-primary';
+      skipBtn.className = 'btn btn-success';
       skipBtn.textContent = '忽略降级（仅执行 ' + opts.safeCount + ' 个非降级）';
       skipBtn.disabled = !opts.safeCount;
       if (skipBtn.disabled) skipBtn.title = '没有可执行的非降级项';
